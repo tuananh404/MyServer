@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
@@ -34,16 +35,22 @@ const verifyAdmin = (req, res, next) => {
   next();
 };
 
-// Base health check route
+// ==========================================
+// Health check
+// ==========================================
 app.get('/api', (req, res) => {
-  res.json({ status: "ok", message: "Key Management API is operational." });
+  res.json({ status: "ok", message: "Key Management API is operational.", timestamp: new Date().toISOString() });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: "ok", message: "Key Management API is operational.", timestamp: new Date().toISOString() });
 });
 
 // ==========================================
 // ADMIN ENDPOINTS (Require Admin Bearer Token)
 // ==========================================
 
-// 1. [POST] /api/admin/create-key
+// [POST] /api/admin/create-key
 app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
   const { duration_days, note } = req.body;
 
@@ -51,10 +58,10 @@ app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
     return res.status(400).json({ success: false, message: "duration_days is required." });
   }
 
-  // Generate a random unique key string formatted as KEY_XXXXXX (8 character alphanumeric code)
+  // Generate a strong random unique key (12 char alphanumeric)
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let randomStr = '';
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 12; i++) {
     randomStr += characters.charAt(Math.floor(Math.random() * characters.length));
   }
   const key_string = `KEY_${randomStr}`;
@@ -75,9 +82,7 @@ app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return res.status(201).json({ success: true, key: data });
   } catch (error) {
@@ -86,7 +91,7 @@ app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
   }
 });
 
-// 2. [POST] /api/admin/reset-hwid
+// [POST] /api/admin/reset-hwid
 app.post('/api/admin/reset-hwid', verifyAdmin, async (req, res) => {
   const { key_string } = req.body;
 
@@ -100,14 +105,12 @@ app.post('/api/admin/reset-hwid', verifyAdmin, async (req, res) => {
       .update({
         hwid: null,
         status: 'unactivated',
-        expires_at: null // Reset expiry timer as per reactivation policy
+        expires_at: null
       })
       .eq('key_string', key_string)
       .select();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     if (!data || data.length === 0) {
       return res.status(404).json({ success: false, message: "Key not found." });
@@ -120,7 +123,7 @@ app.post('/api/admin/reset-hwid', verifyAdmin, async (req, res) => {
   }
 });
 
-// 3. [DELETE] /api/admin/delete-key
+// [DELETE] /api/admin/delete-key
 app.delete('/api/admin/delete-key', verifyAdmin, async (req, res) => {
   const { key_string } = req.body;
 
@@ -135,9 +138,7 @@ app.delete('/api/admin/delete-key', verifyAdmin, async (req, res) => {
       .eq('key_string', key_string)
       .select();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     if (!data || data.length === 0) {
       return res.status(404).json({ success: false, message: "Key not found." });
@@ -150,7 +151,44 @@ app.delete('/api/admin/delete-key', verifyAdmin, async (req, res) => {
   }
 });
 
-// 4. [GET] /api/admin/get-keys
+// [POST] /api/admin/ban-key — Ban or Unban a key
+app.post('/api/admin/ban-key', verifyAdmin, async (req, res) => {
+  const { key_string, action } = req.body; // action: 'ban' or 'unban'
+
+  if (!key_string) {
+    return res.status(400).json({ success: false, message: "key_string is required." });
+  }
+
+  const newStatus = action === 'unban' ? 'unactivated' : 'banned';
+
+  try {
+    const updateData = { status: newStatus };
+    // If unbanning, also reset HWID and expires_at so the key can be reused
+    if (action === 'unban') {
+      updateData.hwid = null;
+      updateData.expires_at = null;
+    }
+
+    const { data, error } = await supabase
+      .from('keys_management')
+      .update(updateData)
+      .eq('key_string', key_string)
+      .select();
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ success: false, message: "Key not found." });
+    }
+
+    return res.json({ success: true, message: `Key ${newStatus === 'banned' ? 'banned' : 'unbanned'} successfully.` });
+  } catch (error) {
+    console.error("Error banning/unbanning key:", error);
+    return res.status(500).json({ success: false, message: "Database error." });
+  }
+});
+
+// [GET] /api/admin/get-keys
 app.get('/api/admin/get-keys', verifyAdmin, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -158,9 +196,7 @@ app.get('/api/admin/get-keys', verifyAdmin, async (req, res) => {
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return res.json({ success: true, keys: data });
   } catch (error) {
@@ -169,7 +205,7 @@ app.get('/api/admin/get-keys', verifyAdmin, async (req, res) => {
   }
 });
 
-// 5. [GET] /api/admin/get-fraud
+// [GET] /api/admin/get-fraud
 app.get('/api/admin/get-fraud', verifyAdmin, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -177,9 +213,7 @@ app.get('/api/admin/get-fraud', verifyAdmin, async (req, res) => {
       .select('*')
       .order('logged_at', { ascending: false });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return res.json({ success: true, logs: data });
   } catch (error) {
@@ -188,12 +222,60 @@ app.get('/api/admin/get-fraud', verifyAdmin, async (req, res) => {
   }
 });
 
+// [DELETE] /api/admin/clear-fraud — Clear all fraud logs
+app.delete('/api/admin/clear-fraud', verifyAdmin, async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('fraud_logs')
+      .delete()
+      .gte('id', 0); // delete all rows
+
+    if (error) throw error;
+
+    return res.json({ success: true, message: "All fraud logs cleared." });
+  } catch (error) {
+    console.error("Error clearing fraud logs:", error);
+    return res.status(500).json({ success: false, message: "Database error while clearing fraud logs." });
+  }
+});
+
+// [GET] /api/admin/stats — Dashboard statistics
+app.get('/api/admin/stats', verifyAdmin, async (req, res) => {
+  try {
+    const { data: keys, error: keysError } = await supabase
+      .from('keys_management')
+      .select('status');
+
+    if (keysError) throw keysError;
+
+    const { data: fraudLogs, error: fraudError } = await supabase
+      .from('fraud_logs')
+      .select('id');
+
+    if (fraudError) throw fraudError;
+
+    const stats = {
+      total: keys.length,
+      unactivated: keys.filter(k => k.status === 'unactivated').length,
+      activated: keys.filter(k => k.status === 'activated').length,
+      expired: keys.filter(k => k.status === 'expired').length,
+      banned: keys.filter(k => k.status === 'banned').length,
+      fraudAlerts: fraudLogs.length
+    };
+
+    return res.json({ success: true, stats });
+  } catch (error) {
+    console.error("Error fetching stats:", error);
+    return res.status(500).json({ success: false, message: "Database error while fetching stats." });
+  }
+});
+
 
 // ==========================================
 // CLIENT ENDPOINTS (For ImGui client verification)
 // ==========================================
 
-// 1. [POST] /api/client/login
+// [POST] /api/client/login
 app.post('/api/client/login', async (req, res) => {
   const { key_string, hwid } = req.body;
 
@@ -209,20 +291,13 @@ app.post('/api/client/login', async (req, res) => {
       .eq('key_string', key_string)
       .maybeSingle();
 
-    if (keyError) {
-      throw keyError;
-    }
+    if (keyError) throw keyError;
 
     // 2. Handle invalid key
     if (!keyData) {
-      // Log invalid key login attempt
       await supabase.from('fraud_logs').insert([
-        {
-          hwid,
-          reason: `Sai Key (Attempted Key: ${key_string})`
-        }
+        { hwid, reason: `Sai Key (Attempted Key: ${key_string})` }
       ]);
-
       return res.status(403).json({ success: false, message: "Invalid Key" });
     }
 
@@ -233,30 +308,23 @@ app.post('/api/client/login', async (req, res) => {
 
     const durationDays = keyData.duration_days;
 
-    // 4. Handle unactivated key
+    // 4. Handle unactivated key — first activation
     if (keyData.status === 'unactivated') {
       let expiresAt = null;
 
-      // -1 means lifetime key, so expires_at remains null
+      // -1 means lifetime key
       if (durationDays > 0) {
         const expDate = new Date();
         expDate.setDate(expDate.getDate() + durationDays);
         expiresAt = expDate.toISOString();
       }
 
-      // Update key status to activated, bind HWID and calculate expiration time
       const { error: updateError } = await supabase
         .from('keys_management')
-        .update({
-          hwid,
-          status: 'activated',
-          expires_at: expiresAt
-        })
+        .update({ hwid, status: 'activated', expires_at: expiresAt })
         .eq('key_string', key_string);
 
-      if (updateError) {
-        throw updateError;
-      }
+      if (updateError) throw updateError;
 
       const token = `SESSION_${Math.random().toString(36).substring(2, 15).toUpperCase()}`;
 
@@ -272,7 +340,6 @@ app.post('/api/client/login', async (req, res) => {
     if (keyData.status === 'activated') {
       // Check if key is expired
       if (keyData.expires_at && new Date() > new Date(keyData.expires_at)) {
-        // Update key status to expired in database
         await supabase
           .from('keys_management')
           .update({ status: 'expired' })
@@ -289,14 +356,10 @@ app.post('/api/client/login', async (req, res) => {
           expires_at: keyData.expires_at
         });
       } else {
-        // HWID mismatch - log fraud attempt
+        // HWID mismatch — fraud alert
         await supabase.from('fraud_logs').insert([
-          {
-            hwid,
-            reason: `Bypass Login (Key: ${key_string} - Khác HWID)`
-          }
+          { hwid, reason: `Bypass Login (Key: ${key_string} - Khác HWID)` }
         ]);
-
         return res.status(403).json({ success: false, message: "Key đã dùng cho máy khác" });
       }
     }
@@ -314,11 +377,24 @@ app.post('/api/client/login', async (req, res) => {
   }
 });
 
-// Start listening if run directly (useful for local development)
+// ==========================================
+// STATIC FILE SERVING (Local development only)
+// ==========================================
+if (process.env.NODE_ENV !== 'production') {
+  app.use(express.static(path.join(__dirname, '..', 'public')));
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api')) {
+      res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+    }
+  });
+}
+
+// Start listening (local development only)
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    console.log(`Dashboard: http://localhost:${PORT}`);
   });
 }
 
