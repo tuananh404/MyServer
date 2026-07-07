@@ -1,5 +1,5 @@
 /* ==========================================================================
-   DESIGN SYSTEM & VARIABLES — Premium Dark Cyberpunk v2.0
+   DESIGN SYSTEM & VARIABLES — Premium Dark Cyberpunk v3.0
    ========================================================================== */
 :root {
     --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -31,6 +31,9 @@
     
     --color-warning: #fbbf24;         /* Golden Amber */
     --color-warning-glow: rgba(251, 191, 36, 0.2);
+
+    --color-purple: #a855f7;          /* Vivid Purple */
+    --color-purple-glow: rgba(168, 85, 247, 0.25);
     
     --color-text-main: #f1f5f9;
     --color-text-muted: #94a3b8;
@@ -504,7 +507,7 @@ input[type="number"]:focus {
    ========================================================================== */
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 16px;
     margin-bottom: 20px;
 }
@@ -554,6 +557,9 @@ input[type="number"]:focus {
 .stat-icon-fraud { background: rgba(244, 63, 94, 0.15); color: var(--color-danger); }
 #stat-fraud::after { background: var(--color-danger-solid); }
 
+.stat-icon-tokens { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
+#stat-tokens::after { background: #a855f7; }
+
 .stat-info {
     display: flex;
     flex-direction: column;
@@ -585,6 +591,12 @@ input[type="number"]:focus {
 .grid-col-side { grid-column: 2; }
 .grid-col-full { grid-column: 1 / -1; }
 
+@media (max-width: 1200px) {
+    .stats-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
 @media (max-width: 1024px) {
     .dashboard-grid {
         grid-template-columns: 1fr;
@@ -595,7 +607,19 @@ input[type="number"]:focus {
         grid-column: 1;
     }
     .stats-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .stats-grid {
         grid-template-columns: repeat(2, 1fr);
+    }
+    .token-form-grid {
+        grid-template-columns: 1fr 1fr !important;
+    }
+    .input-grid-3 {
+        grid-template-columns: 1fr !important;
     }
 }
 
@@ -611,6 +635,9 @@ input[type="number"]:focus {
         gap: 12px;
     }
     #app-wrapper { padding: 12px; }
+    .token-form-grid {
+        grid-template-columns: 1fr !important;
+    }
 }
 
 .card-header h2 {
@@ -632,6 +659,73 @@ input[type="number"]:focus {
     background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+}
+
+/* ==========================================================================
+   TOKEN MANAGEMENT
+   ========================================================================== */
+.token-form-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 2fr;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.token-form-grid .form-group {
+    margin-bottom: 12px;
+}
+
+/* ==========================================================================
+   SELECT DROPDOWN (Dark Cyberpunk Theme)
+   ========================================================================== */
+.select-input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 12px 36px 12px 14px;
+    color: var(--color-text-main);
+    font-family: var(--font-primary);
+    font-size: 14px;
+    transition: var(--transition-smooth);
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    background-size: 12px;
+}
+
+.select-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    background-color: rgba(0, 0, 0, 0.45);
+}
+
+.select-input:hover {
+    border-color: var(--color-border-hover);
+}
+
+.select-input option {
+    background: var(--color-card-solid);
+    color: var(--color-text-main);
+    padding: 8px 14px;
+}
+
+.select-input option:disabled {
+    color: var(--color-text-dark);
+}
+
+.token-warning {
+    font-size: 11px;
+    color: var(--color-warning);
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 /* ==========================================================================
@@ -674,17 +768,34 @@ input[type="number"]:focus {
     box-shadow: 0 0 12px var(--color-warning-glow);
 }
 
+.btn-preset.disabled-by-token {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+    text-decoration: line-through;
+}
+
 .input-grid {
     display: grid;
     grid-template-columns: 1fr 2fr;
     gap: 16px;
     margin-bottom: 20px;
 }
-@media (max-width: 600px) {
-    .input-grid { grid-template-columns: 1fr; }
+
+.input-grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 2fr;
+    gap: 16px;
+    margin-bottom: 20px;
 }
 
-.input-grid input { padding-left: 14px; }
+@media (max-width: 600px) {
+    .input-grid { grid-template-columns: 1fr; }
+    .input-grid-3 { grid-template-columns: 1fr; }
+}
+
+.input-grid input,
+.input-grid-3 input { padding-left: 14px; }
 
 /* Generated Key Container */
 .generated-key-box {
@@ -705,6 +816,12 @@ input[type="number"]:focus {
     display: flex;
     flex-direction: column;
     gap: 10px;
+}
+
+.key-box-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .key-box-inner .label {
@@ -747,6 +864,63 @@ input[type="number"]:focus {
 .btn-copy:hover {
     background: var(--color-primary-hover);
     box-shadow: 0 0 12px var(--color-primary-glow);
+}
+
+/* Batch Generated Keys List */
+.generated-keys-list {
+    list-style: none;
+    max-height: 200px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-right: 4px;
+}
+
+.generated-key-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px 8px 14px;
+    transition: var(--transition-fast);
+}
+
+.generated-key-item:hover {
+    background: rgba(0, 0, 0, 0.5);
+    border-color: rgba(99, 102, 241, 0.2);
+}
+
+.generated-key-item .key-text {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--color-secondary);
+    text-shadow: 0 0 8px var(--color-secondary-glow);
+    word-break: break-all;
+}
+
+.generated-key-item .btn-copy-single {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--color-primary);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    padding: 4px 10px;
+    font-size: 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    flex-shrink: 0;
+    font-family: var(--font-primary);
+    font-weight: 600;
+}
+
+.generated-key-item .btn-copy-single:hover {
+    background: var(--color-primary-solid);
+    color: white;
+    box-shadow: 0 0 8px var(--color-primary-glow);
 }
 
 /* ==========================================================================
@@ -965,6 +1139,41 @@ tbody tr:last-child td { border-bottom: none; }
     border: 1px solid rgba(244, 63, 94, 0.2);
 }
 
+/* Device count badge */
+.badge-devices {
+    background: rgba(168, 85, 247, 0.1);
+    color: var(--color-purple);
+    border: 1px solid rgba(168, 85, 247, 0.2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Token badge in keys table */
+.badge-token {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    background: rgba(168, 85, 247, 0.08);
+    color: var(--color-purple);
+    border: 1px solid rgba(168, 85, 247, 0.2);
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.badge-token i {
+    font-size: 8px;
+}
+
 .td-hwid {
     font-family: var(--font-mono);
     font-size: 11px;
@@ -1124,6 +1333,7 @@ tbody tr:last-child td { border-bottom: none; }
 .card-fade-up:nth-child(1) { animation-delay: 0.05s; }
 .card-fade-up:nth-child(2) { animation-delay: 0.15s; }
 .card-fade-up:nth-child(3) { animation-delay: 0.25s; }
+.card-fade-up:nth-child(4) { animation-delay: 0.35s; }
 
 .scale-in {
     animation: scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;

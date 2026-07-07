@@ -35,6 +35,16 @@ const verifyAdmin = (req, res, next) => {
   next();
 };
 
+// Helper: generate random alphanumeric string
+function randomAlphaNum(length) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 // ==========================================
 // Health check
 // ==========================================
@@ -47,47 +57,171 @@ app.get('/api/health', (req, res) => {
 });
 
 // ==========================================
-// ADMIN ENDPOINTS (Require Admin Bearer Token)
+// TOKEN ADMIN ENDPOINTS
 // ==========================================
 
-// [POST] /api/admin/create-key
-app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
-  const { duration_days, note } = req.body;
+// [POST] /api/admin/create-token
+app.post('/api/admin/create-token', verifyAdmin, async (req, res) => {
+  const { token_name, max_devices, max_days, description } = req.body;
 
-  if (duration_days === undefined || duration_days === null) {
-    return res.status(400).json({ success: false, message: "duration_days is required." });
+  if (!token_name || !token_name.trim()) {
+    return res.status(400).json({ success: false, message: "token_name is required." });
   }
 
-  // Generate a strong random unique key (12 char alphanumeric)
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let randomStr = '';
-  for (let i = 0; i < 12; i++) {
-    randomStr += characters.charAt(Math.floor(Math.random() * characters.length));
+  const parsedMaxDevices = parseInt(max_devices) || 1;
+  if (parsedMaxDevices < 1) {
+    return res.status(400).json({ success: false, message: "max_devices must be >= 1." });
   }
-  const key_string = `KEY_${randomStr}`;
+
+  const token_string = `TKN_${randomAlphaNum(12)}`;
 
   try {
     const { data, error } = await supabase
-      .from('keys_management')
-      .insert([
-        {
-          key_string,
-          duration_days: parseInt(duration_days),
-          note: note || '',
-          status: 'unactivated',
-          expires_at: null,
-          hwid: null
-        }
-      ])
+      .from('tokens')
+      .insert([{
+        token_name: token_name.trim(),
+        token_string,
+        max_devices: parsedMaxDevices,
+        max_days: max_days !== undefined && max_days !== null ? parseInt(max_days) : null,
+        description: description || null
+      }])
       .select()
       .single();
 
     if (error) throw error;
 
-    return res.status(201).json({ success: true, key: data });
+    return res.status(201).json({ success: true, token: data });
+  } catch (error) {
+    console.error("Error creating token:", error);
+    return res.status(500).json({ success: false, message: "Database error while creating token." });
+  }
+});
+
+// [GET] /api/admin/get-tokens
+app.get('/api/admin/get-tokens', verifyAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('tokens')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return res.json({ success: true, tokens: data });
+  } catch (error) {
+    console.error("Error fetching tokens:", error);
+    return res.status(500).json({ success: false, message: "Database error while fetching tokens." });
+  }
+});
+
+// [DELETE] /api/admin/delete-token
+app.delete('/api/admin/delete-token', verifyAdmin, async (req, res) => {
+  const { token_id } = req.body;
+
+  if (!token_id) {
+    return res.status(400).json({ success: false, message: "token_id is required." });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('tokens')
+      .delete()
+      .eq('id', token_id)
+      .select();
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ success: false, message: "Token not found." });
+    }
+
+    return res.json({ success: true, message: "Token and associated keys deleted successfully." });
+  } catch (error) {
+    console.error("Error deleting token:", error);
+    return res.status(500).json({ success: false, message: "Database error while deleting token." });
+  }
+});
+
+// ==========================================
+// KEY ADMIN ENDPOINTS
+// ==========================================
+
+// [POST] /api/admin/create-key
+app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
+  const { token_id, duration_days, count, note } = req.body;
+
+  if (!token_id) {
+    return res.status(400).json({ success: false, message: "token_id is required." });
+  }
+
+  if (duration_days === undefined || duration_days === null) {
+    return res.status(400).json({ success: false, message: "duration_days is required." });
+  }
+
+  const parsedDuration = parseInt(duration_days);
+  const parsedCount = Math.min(Math.max(parseInt(count) || 1, 1), 50);
+
+  try {
+    // Validate token exists and fetch max_days
+    const { data: tokenData, error: tokenError } = await supabase
+      .from('tokens')
+      .select('*')
+      .eq('id', token_id)
+      .maybeSingle();
+
+    if (tokenError) throw tokenError;
+
+    if (!tokenData) {
+      return res.status(404).json({ success: false, message: "Token not found." });
+    }
+
+    // Validate duration_days against token.max_days
+    if (parsedDuration === -1) {
+      // Lifetime key: only allowed if token.max_days is null (unlimited)
+      if (tokenData.max_days !== null) {
+        return res.status(400).json({ success: false, message: "Lifetime keys are not allowed for this token (token has max_days set)." });
+      }
+    } else if (parsedDuration > 0) {
+      if (tokenData.max_days !== null && parsedDuration > tokenData.max_days) {
+        return res.status(400).json({ success: false, message: `duration_days (${parsedDuration}) exceeds token max_days (${tokenData.max_days}).` });
+      }
+    } else {
+      return res.status(400).json({ success: false, message: "duration_days must be a positive integer or -1 for lifetime." });
+    }
+
+    // Generate keys
+    const keysToInsert = [];
+    for (let i = 0; i < parsedCount; i++) {
+      const randomPart = randomAlphaNum(8);
+      let key_string;
+      if (parsedDuration === -1) {
+        key_string = `key-lifetime-${randomPart}`;
+      } else {
+        key_string = `key-${parsedDuration}day-${randomPart}`;
+      }
+
+      keysToInsert.push({
+        key_string,
+        token_id: parseInt(token_id),
+        duration_days: parsedDuration,
+        status: 'unactivated',
+        expires_at: null,
+        note: note || null
+      });
+    }
+
+    // Batch insert
+    const { data, error } = await supabase
+      .from('keys_management')
+      .insert(keysToInsert)
+      .select();
+
+    if (error) throw error;
+
+    return res.status(201).json({ success: true, keys: data });
   } catch (error) {
     console.error("Error creating key:", error);
-    return res.status(500).json({ success: false, message: "Database error while generating key." });
+    return res.status(500).json({ success: false, message: "Database error while generating keys." });
   }
 });
 
@@ -100,23 +234,36 @@ app.post('/api/admin/reset-hwid', verifyAdmin, async (req, res) => {
   }
 
   try {
-    const { data, error } = await supabase
+    // Find the key
+    const { data: keyData, error: keyError } = await supabase
       .from('keys_management')
-      .update({
-        hwid: null,
-        status: 'unactivated',
-        expires_at: null
-      })
+      .select('id')
       .eq('key_string', key_string)
-      .select();
+      .maybeSingle();
 
-    if (error) throw error;
+    if (keyError) throw keyError;
 
-    if (!data || data.length === 0) {
+    if (!keyData) {
       return res.status(404).json({ success: false, message: "Key not found." });
     }
 
-    return res.json({ success: true, message: "Hardware ID reset successfully." });
+    // Delete all device entries for this key
+    const { error: deleteError } = await supabase
+      .from('key_devices')
+      .delete()
+      .eq('key_id', keyData.id);
+
+    if (deleteError) throw deleteError;
+
+    // Reset key status and expires_at
+    const { error: updateError } = await supabase
+      .from('keys_management')
+      .update({ status: 'unactivated', expires_at: null })
+      .eq('key_string', key_string);
+
+    if (updateError) throw updateError;
+
+    return res.json({ success: true, message: "All devices reset successfully." });
   } catch (error) {
     console.error("Error resetting HWID:", error);
     return res.status(500).json({ success: false, message: "Database error during HWID reset." });
@@ -163,10 +310,23 @@ app.post('/api/admin/ban-key', verifyAdmin, async (req, res) => {
 
   try {
     const updateData = { status: newStatus };
-    // If unbanning, also reset HWID and expires_at so the key can be reused
+    // If unbanning, also reset expires_at so the key can be reused
     if (action === 'unban') {
-      updateData.hwid = null;
       updateData.expires_at = null;
+
+      // Also clear devices when unbanning
+      const { data: keyData } = await supabase
+        .from('keys_management')
+        .select('id')
+        .eq('key_string', key_string)
+        .maybeSingle();
+
+      if (keyData) {
+        await supabase
+          .from('key_devices')
+          .delete()
+          .eq('key_id', keyData.id);
+      }
     }
 
     const { data, error } = await supabase
@@ -188,17 +348,41 @@ app.post('/api/admin/ban-key', verifyAdmin, async (req, res) => {
   }
 });
 
-// [GET] /api/admin/get-keys
+// [GET] /api/admin/get-keys — Returns all keys with token info and device info
 app.get('/api/admin/get-keys', verifyAdmin, async (req, res) => {
   try {
-    const { data, error } = await supabase
+    // Fetch all keys with token info via join
+    const { data: keys, error: keysError } = await supabase
       .from('keys_management')
-      .select('*')
+      .select('*, tokens(id, token_name, token_string, max_devices, max_days)')
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (keysError) throw keysError;
 
-    return res.json({ success: true, keys: data });
+    // Fetch all devices
+    const { data: devices, error: devicesError } = await supabase
+      .from('key_devices')
+      .select('*');
+
+    if (devicesError) throw devicesError;
+
+    // Build a map: key_id -> list of hwids
+    const deviceMap = {};
+    for (const d of devices) {
+      if (!deviceMap[d.key_id]) {
+        deviceMap[d.key_id] = [];
+      }
+      deviceMap[d.key_id].push(d.hwid);
+    }
+
+    // Enrich keys with device info
+    const enrichedKeys = keys.map(key => ({
+      ...key,
+      device_count: (deviceMap[key.id] || []).length,
+      hwids: deviceMap[key.id] || []
+    }));
+
+    return res.json({ success: true, keys: enrichedKeys });
   } catch (error) {
     console.error("Error fetching keys:", error);
     return res.status(500).json({ success: false, message: "Database error while fetching keys." });
@@ -254,7 +438,14 @@ app.get('/api/admin/stats', verifyAdmin, async (req, res) => {
 
     if (fraudError) throw fraudError;
 
+    const { data: tokens, error: tokensError } = await supabase
+      .from('tokens')
+      .select('id');
+
+    if (tokensError) throw tokensError;
+
     const stats = {
+      totalTokens: tokens.length,
       total: keys.length,
       unactivated: keys.filter(k => k.status === 'unactivated').length,
       activated: keys.filter(k => k.status === 'activated').length,
@@ -270,21 +461,33 @@ app.get('/api/admin/stats', verifyAdmin, async (req, res) => {
   }
 });
 
-
 // ==========================================
 // CLIENT ENDPOINTS (For ImGui client verification)
 // ==========================================
 
 // [POST] /api/client/login
 app.post('/api/client/login', async (req, res) => {
-  const { key_string, hwid } = req.body;
+  const { token_string, key_string, hwid } = req.body;
 
-  if (!key_string || !hwid) {
-    return res.status(400).json({ success: false, message: "key_string and hwid are required." });
+  if (!token_string || !key_string || !hwid) {
+    return res.status(400).json({ success: false, message: "token_string, key_string, and hwid are required." });
   }
 
   try {
-    // 1. Check if the key exists
+    // Step 1: Find the token by token_string
+    const { data: tokenData, error: tokenError } = await supabase
+      .from('tokens')
+      .select('*')
+      .eq('token_string', token_string)
+      .maybeSingle();
+
+    if (tokenError) throw tokenError;
+
+    if (!tokenData) {
+      return res.status(403).json({ success: false, message: "Invalid Token" });
+    }
+
+    // Step 2: Find the key by key_string
     const { data: keyData, error: keyError } = await supabase
       .from('keys_management')
       .select('*')
@@ -293,7 +496,6 @@ app.post('/api/client/login', async (req, res) => {
 
     if (keyError) throw keyError;
 
-    // 2. Handle invalid key
     if (!keyData) {
       await supabase.from('fraud_logs').insert([
         { hwid, reason: `Sai Key (Attempted Key: ${key_string})` }
@@ -301,70 +503,119 @@ app.post('/api/client/login', async (req, res) => {
       return res.status(403).json({ success: false, message: "Invalid Key" });
     }
 
-    // 3. Handle banned key
+    // Step 3: Verify key.token_id matches token.id
+    if (keyData.token_id !== tokenData.id) {
+      await supabase.from('fraud_logs').insert([
+        { hwid, reason: `Key không thuộc Token (Key: ${key_string}, Token: ${token_string})` }
+      ]);
+      return res.status(403).json({ success: false, message: "Key không thuộc Token này" });
+    }
+
+    // Step 4: Check banned
     if (keyData.status === 'banned') {
       return res.status(403).json({ success: false, message: "Key has been banned" });
     }
 
-    const durationDays = keyData.duration_days;
-
-    // 4. Handle unactivated key — first activation
+    // Step 5: If unactivated → activate
     if (keyData.status === 'unactivated') {
       let expiresAt = null;
 
       // -1 means lifetime key
-      if (durationDays > 0) {
+      if (keyData.duration_days > 0) {
         const expDate = new Date();
-        expDate.setDate(expDate.getDate() + durationDays);
+        expDate.setDate(expDate.getDate() + keyData.duration_days);
         expiresAt = expDate.toISOString();
       }
 
+      // Update key status to activated
       const { error: updateError } = await supabase
         .from('keys_management')
-        .update({ hwid, status: 'activated', expires_at: expiresAt })
-        .eq('key_string', key_string);
+        .update({ status: 'activated', expires_at: expiresAt })
+        .eq('id', keyData.id);
 
       if (updateError) throw updateError;
 
-      const token = `SESSION_${Math.random().toString(36).substring(2, 15).toUpperCase()}`;
+      // Insert device into key_devices
+      const { error: deviceError } = await supabase
+        .from('key_devices')
+        .insert([{ key_id: keyData.id, hwid }]);
+
+      if (deviceError) throw deviceError;
+
+      const sessionToken = `SESSION_${Math.random().toString(36).substring(2, 15).toUpperCase()}`;
 
       return res.json({
         success: true,
         message: "Activation successful",
-        token,
+        token: sessionToken,
         expires_at: expiresAt
       });
     }
 
-    // 5. Handle activated key
+    // Step 6: If activated
     if (keyData.status === 'activated') {
-      // Check if key is expired
+      // Check expiry first
       if (keyData.expires_at && new Date() > new Date(keyData.expires_at)) {
         await supabase
           .from('keys_management')
           .update({ status: 'expired' })
-          .eq('key_string', key_string);
+          .eq('id', keyData.id);
 
         return res.status(403).json({ success: false, message: "Key has expired" });
       }
 
-      // Check if HWID matches
-      if (keyData.hwid === hwid) {
+      // Check if this hwid already exists in key_devices for this key
+      const { data: existingDevice, error: existingDeviceError } = await supabase
+        .from('key_devices')
+        .select('id')
+        .eq('key_id', keyData.id)
+        .eq('hwid', hwid)
+        .maybeSingle();
+
+      if (existingDeviceError) throw existingDeviceError;
+
+      if (existingDevice) {
+        // HWID already registered — login successful
         return res.json({
           success: true,
           message: "Login successful",
           expires_at: keyData.expires_at
         });
-      } else {
-        // HWID mismatch — fraud alert
-        await supabase.from('fraud_logs').insert([
-          { hwid, reason: `Bypass Login (Key: ${key_string} - Khác HWID)` }
-        ]);
-        return res.status(403).json({ success: false, message: "Key đã dùng cho máy khác" });
       }
+
+      // HWID not found — check device count
+      const { data: currentDevices, error: countError } = await supabase
+        .from('key_devices')
+        .select('id')
+        .eq('key_id', keyData.id);
+
+      if (countError) throw countError;
+
+      const currentCount = currentDevices ? currentDevices.length : 0;
+
+      if (currentCount < tokenData.max_devices) {
+        // Still room — add new device
+        const { error: insertDeviceError } = await supabase
+          .from('key_devices')
+          .insert([{ key_id: keyData.id, hwid }]);
+
+        if (insertDeviceError) throw insertDeviceError;
+
+        return res.json({
+          success: true,
+          message: "Login successful",
+          expires_at: keyData.expires_at
+        });
+      }
+
+      // Device limit reached
+      await supabase.from('fraud_logs').insert([
+        { hwid, reason: `Vượt giới hạn thiết bị (Key: ${key_string}, Limit: ${tokenData.max_devices})` }
+      ]);
+      return res.status(403).json({ success: false, message: "Đã đạt giới hạn thiết bị" });
     }
 
-    // 6. Handle expired key status
+    // Step 7: If expired
     if (keyData.status === 'expired') {
       return res.status(403).json({ success: false, message: "Key has expired" });
     }

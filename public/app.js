@@ -1,6 +1,6 @@
 /**
- * Client-side Controller for Owner Dashboard v2.0
- * Enhanced with stats, ban/unban, clear fraud, animated counters
+ * Client-side Controller for Owner Dashboard v3.0
+ * Token-based key management system
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -8,9 +8,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const state = {
         adminToken: localStorage.getItem('admin_token') || '',
         keysList: [],
+        tokensList: [],
         fraudLogs: [],
-        stats: { total: 0, unactivated: 0, activated: 0, expired: 0, banned: 0, fraudAlerts: 0 },
+        stats: { total: 0, unactivated: 0, activated: 0, expired: 0, banned: 0, fraudAlerts: 0, totalTokens: 0 },
         selectedDuration: 1,
+        selectedTokenId: null,
         currentModalAction: null
     };
 
@@ -26,14 +28,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const logoutBtn = document.getElementById('logout-btn');
     const refreshBtn = document.getElementById('refresh-btn');
 
+    // Token management elements
+    const tokenForm = document.getElementById('token-form');
+    const tokenNameInput = document.getElementById('token-name-input');
+    const tokenMaxDevicesInput = document.getElementById('token-max-devices-input');
+    const tokenMaxDaysInput = document.getElementById('token-max-days-input');
+    const tokenDescInput = document.getElementById('token-desc-input');
+    const createTokenBtn = document.getElementById('create-token-btn');
+    const tokensTableBody = document.getElementById('tokens-table-body');
+
     // Generator elements
+    const tokenSelect = document.getElementById('token-select');
+    const tokenWarning = document.getElementById('token-warning');
     const presetButtons = document.querySelectorAll('.btn-preset');
     const durationInput = document.getElementById('duration-input');
+    const countInput = document.getElementById('count-input');
     const noteInput = document.getElementById('note-input');
     const createKeyBtn = document.getElementById('create-key-btn');
     const generatedKeyBox = document.getElementById('generated-key-box');
-    const generatedKeyString = document.getElementById('generated-key-string');
-    const copyKeyBtn = document.getElementById('copy-key-btn');
+    const generatedKeysList = document.getElementById('generated-keys-list');
+    const copyAllBtn = document.getElementById('copy-all-btn');
 
     // Table elements
     const keysTableBody = document.getElementById('keys-table-body');
@@ -101,7 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function showLoadingState() {
         keysTableBody.innerHTML = `
             <tr>
-                <td colspan="7" class="loading-state">
+                <td colspan="8" class="loading-state">
                     <i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu...
                 </td>
             </tr>
@@ -123,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch(endpoint, config);
             if (response.status === 401 || response.status === 403) {
-                if (endpoint.includes('/get-keys') || endpoint.includes('/stats')) {
+                if (endpoint.includes('/get-keys') || endpoint.includes('/stats') || endpoint.includes('/get-tokens')) {
                     return { success: false, status: response.status, message: 'Unauthorized' };
                 }
                 showToast('Phiên làm việc hết hạn.', 'error');
@@ -140,10 +154,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadData() {
-        const [keysRes, fraudRes, statsRes] = await Promise.all([
+        const [keysRes, fraudRes, statsRes, tokensRes] = await Promise.all([
             apiRequest('/api/admin/get-keys'),
             apiRequest('/api/admin/get-fraud'),
-            apiRequest('/api/admin/stats')
+            apiRequest('/api/admin/stats'),
+            apiRequest('/api/admin/get-tokens')
         ]);
 
         if (keysRes.success && fraudRes.success) {
@@ -152,15 +167,29 @@ document.addEventListener('DOMContentLoaded', () => {
             if (statsRes.success) {
                 state.stats = statsRes.data.stats;
             }
+            if (tokensRes.success) {
+                state.tokensList = tokensRes.data.tokens || [];
+            }
 
             updateApiStatus(true);
             renderStats();
             renderKeys();
             renderFraudLogs();
+            renderTokens();
+            renderTokenSelect();
             return true;
         } else {
             updateApiStatus(false);
             return false;
+        }
+    }
+
+    async function loadTokens() {
+        const res = await apiRequest('/api/admin/get-tokens');
+        if (res.success) {
+            state.tokensList = res.data.tokens || [];
+            renderTokens();
+            renderTokenSelect();
         }
     }
 
@@ -228,19 +257,152 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function renderTokens() {
+        if (state.tokensList.length === 0) {
+            tokensTableBody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="loading-state">
+                        <i class="fa-solid fa-cube" style="opacity:0.3;"></i> Chưa có Token nào
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tokensTableBody.innerHTML = state.tokensList.map(token => {
+            const maxDaysDisplay = token.max_days
+                ? `${token.max_days} ngày`
+                : '<span style="color:var(--color-warning)">∞ Không giới hạn</span>';
+
+            return `
+                <tr>
+                    <td><strong>${escapeHTML(token.token_name)}</strong></td>
+                    <td class="key-string-cell">${escapeHTML(token.token_string || token.id)}</td>
+                    <td>${token.max_devices}</td>
+                    <td>${maxDaysDisplay}</td>
+                    <td><span style="font-size:12px; color: var(--color-text-muted);">${escapeHTML(token.description || '')}</span></td>
+                    <td class="actions-cell">
+                        <button class="btn btn-danger-outline btn-sm action-delete-token" data-token-id="${token.id}" title="Xóa Token">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Attach delete event listeners
+        document.querySelectorAll('.action-delete-token').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tokenId = btn.getAttribute('data-token-id');
+                const token = state.tokensList.find(t => t.id === tokenId);
+                const tokenName = token ? token.token_name : tokenId;
+                confirmAction('Xóa Token', `<strong style="color:var(--color-danger)">Hành động không thể hoàn tác!</strong><br>Xóa Token: <strong>${escapeHTML(tokenName)}</strong>?<br><small style="color:var(--color-text-dark)">Các key liên kết sẽ không bị ảnh hưởng.</small>`, async () => {
+                    const res = await apiRequest('/api/admin/delete-token', 'DELETE', { token_id: tokenId });
+                    if (res.success) {
+                        showToast(`Đã xóa Token "${tokenName}".`, 'success');
+                        loadData();
+                    } else {
+                        showToast(`Lỗi: ${res.data?.message || 'Unknown error'}`, 'error');
+                    }
+                });
+            });
+        });
+    }
+
+    function renderTokenSelect() {
+        // Preserve current selection if possible
+        const prevSelected = state.selectedTokenId;
+
+        // Clear existing options except default
+        tokenSelect.innerHTML = '<option value="" disabled>-- Chọn Token --</option>';
+
+        state.tokensList.forEach(token => {
+            const maxDaysLabel = token.max_days ? ` (${token.max_days}d)` : ' (∞)';
+            const option = document.createElement('option');
+            option.value = token.id;
+            option.textContent = `${token.token_name}${maxDaysLabel} — max ${token.max_devices} thiết bị`;
+            tokenSelect.appendChild(option);
+        });
+
+        // Auto-select if only 1 token
+        if (state.tokensList.length === 1) {
+            tokenSelect.value = state.tokensList[0].id;
+            state.selectedTokenId = state.tokensList[0].id;
+            updatePresetStates();
+        } else if (prevSelected && state.tokensList.find(t => t.id === prevSelected)) {
+            tokenSelect.value = prevSelected;
+            state.selectedTokenId = prevSelected;
+            updatePresetStates();
+        } else {
+            tokenSelect.selectedIndex = 0;
+            state.selectedTokenId = null;
+        }
+    }
+
+    function getSelectedToken() {
+        if (!state.selectedTokenId) return null;
+        return state.tokensList.find(t => t.id === state.selectedTokenId) || null;
+    }
+
+    function updatePresetStates() {
+        const token = getSelectedToken();
+        const maxDays = token?.max_days || null; // null = unlimited
+
+        presetButtons.forEach(btn => {
+            const days = parseInt(btn.getAttribute('data-days'));
+            // If token has max_days, disable presets that exceed it (except lifetime -1 needs special handling)
+            if (maxDays !== null) {
+                if (days === -1) {
+                    // Lifetime — disable if token has max_days
+                    btn.classList.add('disabled-by-token');
+                } else if (days > maxDays) {
+                    btn.classList.add('disabled-by-token');
+                } else {
+                    btn.classList.remove('disabled-by-token');
+                }
+            } else {
+                // No max_days limit, enable all
+                btn.classList.remove('disabled-by-token');
+            }
+        });
+
+        // Check custom duration warning
+        validateDurationAgainstToken();
+    }
+
+    function validateDurationAgainstToken() {
+        const token = getSelectedToken();
+        if (!token || !token.max_days) {
+            tokenWarning.classList.add('hidden');
+            tokenWarning.textContent = '';
+            return true;
+        }
+
+        const duration = parseInt(durationInput.value);
+        if (duration === -1 || (duration > token.max_days)) {
+            tokenWarning.classList.remove('hidden');
+            tokenWarning.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Token "${escapeHTML(token.token_name)}" giới hạn tối đa ${token.max_days} ngày`;
+            return false;
+        }
+
+        tokenWarning.classList.add('hidden');
+        tokenWarning.textContent = '';
+        return true;
+    }
+
     function renderKeys() {
         const query = searchKeyInput.value.toLowerCase().trim();
         const filteredKeys = state.keysList.filter(key => {
             const keyMatch = key.key_string.toLowerCase().includes(query);
             const noteMatch = (key.note || '').toLowerCase().includes(query);
-            const hwidMatch = (key.hwid || '').toLowerCase().includes(query);
-            return keyMatch || noteMatch || hwidMatch;
+            const tokenMatch = (key.token_name || '').toLowerCase().includes(query);
+            return keyMatch || noteMatch || tokenMatch;
         });
 
         if (filteredKeys.length === 0) {
             keysTableBody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="loading-state">
+                    <td colspan="8" class="loading-state">
                         <i class="fa-solid fa-folder-open" style="opacity:0.3;"></i> Không tìm thấy keys nào
                     </td>
                 </tr>
@@ -263,10 +425,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? '<span style="color:var(--color-warning)">∞</span>'
                 : `${key.duration_days} ngày`;
 
-            // HWID display
-            const hwidDisplay = key.hwid
-                ? `<span class="td-hwid">${escapeHTML(key.hwid)}</span>`
-                : `<span class="td-hwid none">Chưa kích hoạt</span>`;
+            // Token name badge
+            const tokenDisplay = key.token_name
+                ? `<span class="badge-token"><i class="fa-solid fa-cube"></i> ${escapeHTML(key.token_name)}</span>`
+                : '<span style="color:var(--color-text-dark); font-size:11px;">—</span>';
+
+            // Device count display
+            const deviceCount = key.device_count || 0;
+            // Find token to get max_devices
+            const keyToken = key.token_id ? state.tokensList.find(t => t.id === key.token_id) : null;
+            const maxDevices = keyToken ? keyToken.max_devices : '?';
+            const deviceDisplay = `<span class="badge-devices"><i class="fa-solid fa-display" style="font-size:9px;"></i> ${deviceCount}/${maxDevices}</span>`;
 
             // Status badges
             const statusMap = {
@@ -306,9 +475,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
                 <tr>
                     <td class="key-string-cell">${escapeHTML(key.key_string)}</td>
+                    <td>${tokenDisplay}</td>
                     <td>${durationDisplay}</td>
                     <td style="font-size:12px;">${expiryDisplay}</td>
-                    <td>${hwidDisplay}</td>
+                    <td>${deviceDisplay}</td>
                     <td>${statusBadge}</td>
                     <td><span style="font-size:12px; color: var(--color-text-muted);">${escapeHTML(key.note || '')}</span></td>
                     <td class="actions-cell">${actionButtons}</td>
@@ -449,17 +619,21 @@ document.addEventListener('DOMContentLoaded', () => {
             state.keysList = check.data.keys || [];
 
             // Load remaining data
-            const [fraudCheck, statsCheck] = await Promise.all([
+            const [fraudCheck, statsCheck, tokensCheck] = await Promise.all([
                 apiRequest('/api/admin/get-fraud'),
-                apiRequest('/api/admin/stats')
+                apiRequest('/api/admin/stats'),
+                apiRequest('/api/admin/get-tokens')
             ]);
             if (fraudCheck.success) state.fraudLogs = fraudCheck.data.logs || [];
             if (statsCheck.success) state.stats = statsCheck.data.stats;
+            if (tokensCheck.success) state.tokensList = tokensCheck.data.tokens || [];
 
             showDashboard();
             renderStats();
             renderKeys();
             renderFraudLogs();
+            renderTokens();
+            renderTokenSelect();
             updateApiStatus(true);
             startAutoRefresh();
             showToast('Đăng nhập thành công!', 'success');
@@ -490,14 +664,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 800);
     });
 
+    // Token select change
+    tokenSelect.addEventListener('change', () => {
+        state.selectedTokenId = tokenSelect.value || null;
+        updatePresetStates();
+    });
+
     // Preset buttons
     presetButtons.forEach(btn => {
         btn.addEventListener('click', () => {
+            if (btn.classList.contains('disabled-by-token')) return;
             presetButtons.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             const days = parseInt(btn.getAttribute('data-days'));
             state.selectedDuration = days;
             durationInput.value = days;
+            validateDurationAgainstToken();
         });
     });
 
@@ -509,59 +691,162 @@ document.addEventListener('DOMContentLoaded', () => {
             const btnDays = parseInt(btn.getAttribute('data-days'));
             btn.classList.toggle('active', btnDays === val);
         });
+        validateDurationAgainstToken();
+    });
+
+    // Create Token
+    createTokenBtn.addEventListener('click', async () => {
+        const tokenName = tokenNameInput.value.trim();
+        if (!tokenName) {
+            showToast('Vui lòng nhập tên Token.', 'error');
+            tokenNameInput.focus();
+            return;
+        }
+
+        const maxDevices = parseInt(tokenMaxDevicesInput.value) || 1;
+        const maxDaysVal = tokenMaxDaysInput.value.trim();
+        const maxDays = maxDaysVal ? parseInt(maxDaysVal) : null;
+        const description = tokenDescInput.value.trim();
+
+        createTokenBtn.disabled = true;
+        createTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Đang tạo...</span>';
+
+        const body = {
+            token_name: tokenName,
+            max_devices: maxDevices,
+            description: description
+        };
+        if (maxDays !== null) body.max_days = maxDays;
+
+        const res = await apiRequest('/api/admin/create-token', 'POST', body);
+
+        createTokenBtn.disabled = false;
+        createTokenBtn.innerHTML = '<i class="fa-solid fa-plus"></i> <span class="btn-text">Tạo Token</span>';
+
+        if (res.success && res.data.token) {
+            showToast(`Tạo Token "${tokenName}" thành công!`, 'success');
+            tokenNameInput.value = '';
+            tokenMaxDevicesInput.value = '1';
+            tokenMaxDaysInput.value = '';
+            tokenDescInput.value = '';
+            loadData();
+        } else {
+            showToast(`Lỗi tạo Token: ${res.data?.message || 'Unknown'}`, 'error');
+        }
     });
 
     // Create key
     createKeyBtn.addEventListener('click', async () => {
+        // Validate token selection
+        if (!state.selectedTokenId) {
+            showToast('Vui lòng chọn Token Package trước khi tạo key.', 'error');
+            tokenSelect.focus();
+            return;
+        }
+
         const note = noteInput.value.trim();
         const duration = state.selectedDuration;
+        const count = parseInt(countInput.value) || 1;
+
+        // Validate duration against token max_days
+        if (!validateDurationAgainstToken()) {
+            showToast('Thời hạn vượt quá giới hạn của Token đã chọn.', 'error');
+            return;
+        }
 
         createKeyBtn.disabled = true;
         createKeyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Đang tạo...</span>';
 
         const res = await apiRequest('/api/admin/create-key', 'POST', {
+            token_id: state.selectedTokenId,
             duration_days: duration,
+            count: count,
             note: note
         });
 
         createKeyBtn.disabled = false;
         createKeyBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> <span class="btn-text">Tạo Key Ngay</span>';
 
-        if (res.success && res.data.key) {
-            const keyString = res.data.key.key_string;
-            generatedKeyString.innerText = keyString;
-            generatedKeyBox.classList.remove('hidden');
+        if (res.success && res.data.keys) {
+            const keys = res.data.keys;
+            displayGeneratedKeys(keys);
             noteInput.value = '';
-            showToast('Tạo Key thành công!', 'success');
+            countInput.value = '1';
+            showToast(`Tạo ${keys.length} Key thành công!`, 'success');
             loadData();
         } else {
             showToast(`Lỗi tạo key: ${res.data?.message || 'Unknown'}`, 'error');
         }
     });
 
-    // Copy to clipboard
-    copyKeyBtn.addEventListener('click', () => {
-        const key = generatedKeyString.innerText;
-        navigator.clipboard.writeText(key).then(() => {
-            const orig = copyKeyBtn.innerHTML;
-            copyKeyBtn.innerHTML = '<i class="fa-solid fa-check"></i> <span>Copied!</span>';
-            copyKeyBtn.classList.add('btn-success');
-            showToast('Đã copy Key!', 'success');
+    // Display generated keys in the box
+    function displayGeneratedKeys(keys) {
+        generatedKeysList.innerHTML = keys.map(key => {
+            const keyStr = key.key_string || key;
+            return `
+                <li class="generated-key-item">
+                    <span class="key-text">${escapeHTML(keyStr)}</span>
+                    <button class="btn-copy-single" data-key="${escapeHTML(keyStr)}" title="Copy">
+                        <i class="fa-regular fa-copy"></i> Copy
+                    </button>
+                </li>
+            `;
+        }).join('');
+
+        generatedKeyBox.classList.remove('hidden');
+
+        // Attach copy single handlers
+        document.querySelectorAll('.btn-copy-single').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const keyStr = btn.getAttribute('data-key');
+                copyToClipboard(keyStr).then(() => {
+                    const origHTML = btn.innerHTML;
+                    btn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+                    btn.style.background = 'var(--color-success)';
+                    btn.style.color = 'white';
+                    btn.style.borderColor = 'var(--color-success)';
+                    setTimeout(() => {
+                        btn.innerHTML = origHTML;
+                        btn.style.background = '';
+                        btn.style.color = '';
+                        btn.style.borderColor = '';
+                    }, 1500);
+                });
+            });
+        });
+    }
+
+    // Copy All button
+    copyAllBtn.addEventListener('click', () => {
+        const allKeys = Array.from(generatedKeysList.querySelectorAll('.key-text'))
+            .map(el => el.textContent)
+            .join('\n');
+
+        copyToClipboard(allKeys).then(() => {
+            const origHTML = copyAllBtn.innerHTML;
+            copyAllBtn.innerHTML = '<i class="fa-solid fa-check"></i> <span>Copied!</span>';
+            copyAllBtn.classList.add('btn-success');
+            showToast('Đã copy tất cả Keys!', 'success');
             setTimeout(() => {
-                copyKeyBtn.innerHTML = orig;
-                copyKeyBtn.classList.remove('btn-success');
+                copyAllBtn.innerHTML = origHTML;
+                copyAllBtn.classList.remove('btn-success');
             }, 2000);
-        }).catch(() => {
+        });
+    });
+
+    // Generic copy helper
+    function copyToClipboard(text) {
+        return navigator.clipboard.writeText(text).catch(() => {
             // Fallback for older browsers
             const textarea = document.createElement('textarea');
-            textarea.value = key;
+            textarea.value = text;
             document.body.appendChild(textarea);
             textarea.select();
             document.execCommand('copy');
             document.body.removeChild(textarea);
-            showToast('Đã copy Key!', 'success');
+            return Promise.resolve();
         });
-    });
+    }
 
     // Search filter
     searchKeyInput.addEventListener('input', () => renderKeys());

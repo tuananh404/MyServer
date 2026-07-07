@@ -121,10 +121,72 @@
                         <span class="stat-label">Cảnh báo gian lận</span>
                     </div>
                 </div>
+                <div class="stat-card glass-card" id="stat-tokens">
+                    <div class="stat-icon stat-icon-tokens">
+                        <i class="fa-solid fa-cube"></i>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-number" data-stat="totalTokens">0</span>
+                        <span class="stat-label">Token Packages</span>
+                    </div>
+                </div>
             </div>
 
             <!-- GRID SYSTEM -->
             <main class="dashboard-grid">
+
+                <!-- TOKEN MANAGEMENT CARD -->
+                <section class="glass-card grid-col-full card-fade-up" id="token-management-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-cube text-gradient"></i> Quản Lý Token</h2>
+                        <p>Tạo gói Token trước khi tạo Key</p>
+                    </div>
+
+                    <form id="token-form" class="token-form-grid">
+                        <div class="form-group">
+                            <label for="token-name-input">Token Name</label>
+                            <input type="text" id="token-name-input" placeholder="VD: VIP Package" required style="padding-left:14px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="token-max-devices-input">Max Devices</label>
+                            <input type="number" id="token-max-devices-input" min="1" value="1" style="padding-left:14px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="token-max-days-input">Max Days</label>
+                            <input type="number" id="token-max-days-input" min="1" placeholder="Không giới hạn" style="padding-left:14px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="token-desc-input">Mô tả</label>
+                            <input type="text" id="token-desc-input" placeholder="VD: Gói cho khách VIP" style="padding-left:14px;">
+                        </div>
+                    </form>
+                    <button id="create-token-btn" class="btn btn-primary btn-glow" style="margin-bottom: 20px;">
+                        <i class="fa-solid fa-plus"></i>
+                        <span class="btn-text">Tạo Token</span>
+                    </button>
+
+                    <div class="table-responsive">
+                        <table id="tokens-table">
+                            <thead>
+                                <tr>
+                                    <th>Token Name</th>
+                                    <th>Token String</th>
+                                    <th>Max Devices</th>
+                                    <th>Max Days</th>
+                                    <th>Mô tả</th>
+                                    <th class="text-right">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tokens-table-body">
+                                <tr>
+                                    <td colspan="6" class="loading-state">
+                                        <i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
                 
                 <!-- KEY GENERATION CARD -->
                 <section class="glass-card grid-col-main card-fade-up">
@@ -134,6 +196,15 @@
                     </div>
                     
                     <div class="generator-body">
+                        <!-- Token Selector -->
+                        <div class="form-group">
+                            <label for="token-select">Chọn Token Package</label>
+                            <select id="token-select" class="select-input">
+                                <option value="" disabled selected>-- Chọn Token --</option>
+                            </select>
+                            <small id="token-warning" class="token-warning hidden"></small>
+                        </div>
+
                         <!-- Presets -->
                         <div class="form-group">
                             <label>Chọn nhanh thời hạn</label>
@@ -147,15 +218,19 @@
                             </div>
                         </div>
 
-                        <!-- Inputs -->
-                        <div class="input-grid">
+                        <!-- Inputs (3-column) -->
+                        <div class="input-grid-3">
                             <div class="form-group">
                                 <label for="duration-input">Custom (ngày)</label>
-                                <input type="number" id="duration-input" min="-1" value="1" placeholder="15">
+                                <input type="number" id="duration-input" min="-1" value="1" placeholder="15" style="padding-left:14px;">
+                            </div>
+                            <div class="form-group">
+                                <label for="count-input">Số lượng key</label>
+                                <input type="number" id="count-input" min="1" max="50" value="1" style="padding-left:14px;">
                             </div>
                             <div class="form-group">
                                 <label for="note-input">Ghi chú</label>
-                                <input type="text" id="note-input" placeholder="VD: Anh Tuấn — VIP Client">
+                                <input type="text" id="note-input" placeholder="VD: Anh Tuấn — VIP Client" style="padding-left:14px;">
                             </div>
                         </div>
 
@@ -168,14 +243,16 @@
                     <!-- Generated Key Display -->
                     <div id="generated-key-box" class="generated-key-box hidden">
                         <div class="key-box-inner">
-                            <span class="label"><i class="fa-solid fa-circle-check"></i> Key được tạo thành công</span>
-                            <div class="key-display-wrapper">
-                                <span id="generated-key-string">KEY_ABC123XYZ</span>
-                                <button id="copy-key-btn" class="btn btn-copy" title="Copy to clipboard">
+                            <div class="key-box-header">
+                                <span class="label"><i class="fa-solid fa-circle-check"></i> Key được tạo thành công</span>
+                                <button id="copy-all-btn" class="btn btn-copy" title="Copy all keys">
                                     <i class="fa-regular fa-copy"></i>
-                                    <span>Copy</span>
+                                    <span>Copy All</span>
                                 </button>
                             </div>
+                            <ul id="generated-keys-list" class="generated-keys-list">
+                                <!-- JS will populate keys here -->
+                            </ul>
                         </div>
                     </div>
                 </section>
@@ -220,9 +297,10 @@
                             <thead>
                                 <tr>
                                     <th>Key/Token</th>
+                                    <th>Token</th>
                                     <th>Thời hạn</th>
                                     <th>Ngày hết hạn</th>
-                                    <th>HWID / Thiết bị</th>
+                                    <th>Thiết bị</th>
                                     <th>Trạng thái</th>
                                     <th>Ghi chú</th>
                                     <th class="text-right">Hành động</th>
@@ -230,7 +308,7 @@
                             </thead>
                             <tbody id="keys-table-body">
                                 <tr>
-                                    <td colspan="7" class="loading-state">
+                                    <td colspan="8" class="loading-state">
                                         <i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu...
                                     </td>
                                 </tr>
@@ -244,7 +322,7 @@
             <!-- FOOTER -->
             <footer class="dashboard-footer">
                 <span>© 2026 Admin Panel — Key Management System</span>
-                <span class="footer-version">v2.0</span>
+                <span class="footer-version">v3.0</span>
             </footer>
         </div>
 
