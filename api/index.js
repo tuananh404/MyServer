@@ -15,7 +15,11 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error("Missing Supabase configuration. Please check your .env variables.");
+  console.error("[SERVER] FATAL: Missing Supabase configuration. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Vercel environment variables.");
+  console.error("[SERVER] SUPABASE_URL:", supabaseUrl ? "SET" : "MISSING");
+  console.error("[SERVER] SUPABASE_SERVICE_ROLE_KEY:", supabaseKey ? "SET" : "MISSING");
+} else {
+  console.log(`[SERVER] Supabase connected: ${supabaseUrl}`);
 }
 
 const supabase = createClient(supabaseUrl || '', supabaseKey || '');
@@ -34,6 +38,25 @@ const verifyAdmin = (req, res, next) => {
   }
   next();
 };
+
+// Global error wrapper for all API routes
+function apiWrapper(handler) {
+  return async (req, res, next) => {
+    // Check Supabase config before any DB operation
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({ 
+        success: false, 
+        message: "Server misconfiguration: Database connection not set up. Please configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables in Vercel." 
+      });
+    }
+    try {
+      await handler(req, res, next);
+    } catch (err) {
+      console.error("[API] Unhandled error:", err.message || err);
+      res.status(500).json({ success: false, message: "Internal server error. Check server logs." });
+    }
+  };
+}
 
 // Helper: generate random alphanumeric string
 function randomAlphaNum(length) {
@@ -476,12 +499,54 @@ app.get('/api/admin/stats', verifyAdmin, async (req, res) => {
 // CLIENT ENDPOINTS (For ImGui client verification)
 // ==========================================
 
+// ==========================================
+// Client Login — Rate limiter (simple in-memory, 5 req/sec per HWID)
+// ==========================================
+const loginRateLimit = new Map(); // hwid -> { count, resetTime }
+
+function checkClientRateLimit(hwid) {
+  const now = Date.now();
+  const key = hwid || 'unknown';
+  if (!loginRateLimit.has(key)) {
+    loginRateLimit.set(key, { count: 1, resetTime: now + 1000 });
+    return true;
+  }
+  const record = loginRateLimit.get(key);
+  if (now > record.resetTime) {
+    record.count = 1;
+    record.resetTime = now + 1000;
+    return true;
+  }
+  if (record.count >= 5) {
+    return false; // rate limited
+  }
+  record.count++;
+  return true;
+}
+
+// Garbage-collect expired rate limit records every 60s
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of loginRateLimit) {
+    if (now > v.resetTime + 60000) loginRateLimit.delete(k);
+  }
+}, 60000);
+
 // [POST] /api/client/login
 app.post('/api/client/login', async (req, res) => {
   const { token_string, key_string, hwid } = req.body;
 
+  console.log(`[CLIENT LOGIN] Request: token="${token_string}", key="${key_string}", hwid="${hwid}"`);
+
   if (!token_string || !key_string || !hwid) {
+    console.log(`[CLIENT LOGIN] Missing fields: token=${!!token_string}, key=${!!key_string}, hwid=${!!hwid}`);
     return res.status(400).json({ success: false, message: "token_string, key_string, and hwid are required." });
+  }
+
+  // Basic rate limiting
+  if (!checkClientRateLimit(hwid)) {
+    console.log(`[CLIENT LOGIN] Rate limited: hwid="${hwid}"`);
+    return res.status(429).json({ success: false, message: "Too many requests. Please wait." });
   }
 
   try {
@@ -640,7 +705,7 @@ app.post('/api/client/login', async (req, res) => {
     return res.status(500).json({ success: false, message: "Unknown key state error." });
 
   } catch (error) {
-    console.error("Client login processing error:", error);
+    console.error("[CLIENT LOGIN] Internal error:", error.message || error);
     return res.status(500).json({ success: false, message: "Database or internal server error." });
   }
 });
