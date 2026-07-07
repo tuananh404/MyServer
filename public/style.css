@@ -794,8 +794,32 @@ input[type="number"]:focus {
     .input-grid-3 { grid-template-columns: 1fr; }
 }
 
+.key-inputs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.2fr 1.8fr;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.grid-col-span-all {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 768px) {
+    .key-inputs-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .key-inputs-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 .input-grid input,
-.input-grid-3 input { padding-left: 14px; }
+.input-grid-3 input,
+.key-inputs-grid input { padding-left: 14px; }
 
 /* Generated Key Container */
 .generated-key-box {

@@ -31,7 +31,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Token management elements
     const tokenForm = document.getElementById('token-form');
     const tokenNameInput = document.getElementById('token-name-input');
-    const tokenMaxDevicesInput = document.getElementById('token-max-devices-input');
     const tokenMaxDaysInput = document.getElementById('token-max-days-input');
     const tokenDescInput = document.getElementById('token-desc-input');
     const createTokenBtn = document.getElementById('create-token-btn');
@@ -43,6 +42,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const presetButtons = document.querySelectorAll('.btn-preset');
     const durationInput = document.getElementById('duration-input');
     const countInput = document.getElementById('count-input');
+    const maxDevicesInput = document.getElementById('max-devices-input');
+    const customKeyInput = document.getElementById('custom-key-input');
     const noteInput = document.getElementById('note-input');
     const createKeyBtn = document.getElementById('create-key-btn');
     const generatedKeyBox = document.getElementById('generated-key-box');
@@ -261,7 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.tokensList.length === 0) {
             tokensTableBody.innerHTML = `
                 <tr>
-                    <td colspan="6" class="loading-state">
+                    <td colspan="5" class="loading-state">
                         <i class="fa-solid fa-cube" style="opacity:0.3;"></i> Chưa có Token nào
                     </td>
                 </tr>
@@ -278,7 +279,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 <tr>
                     <td><strong>${escapeHTML(token.token_name)}</strong></td>
                     <td class="key-string-cell">${escapeHTML(token.token_string || token.id)}</td>
-                    <td>${token.max_devices}</td>
                     <td>${maxDaysDisplay}</td>
                     <td><span style="font-size:12px; color: var(--color-text-muted);">${escapeHTML(token.description || '')}</span></td>
                     <td class="actions-cell">
@@ -320,7 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const maxDaysLabel = token.max_days ? ` (${token.max_days}d)` : ' (∞)';
             const option = document.createElement('option');
             option.value = token.id;
-            option.textContent = `${token.token_name}${maxDaysLabel} — max ${token.max_devices} thiết bị`;
+            option.textContent = `${token.token_name}${maxDaysLabel}`;
             tokenSelect.appendChild(option);
         });
 
@@ -432,9 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Device count display
             const deviceCount = key.device_count || 0;
-            // Find token to get max_devices
-            const keyToken = key.token_id ? state.tokensList.find(t => t.id === key.token_id) : null;
-            const maxDevices = keyToken ? keyToken.max_devices : '?';
+            const maxDevices = key.max_devices !== undefined ? key.max_devices : '?';
             const deviceDisplay = `<span class="badge-devices"><i class="fa-solid fa-display" style="font-size:9px;"></i> ${deviceCount}/${maxDevices}</span>`;
 
             // Status badges
@@ -703,7 +701,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const maxDevices = parseInt(tokenMaxDevicesInput.value) || 1;
         const maxDaysVal = tokenMaxDaysInput.value.trim();
         const maxDays = maxDaysVal ? parseInt(maxDaysVal) : null;
         const description = tokenDescInput.value.trim();
@@ -713,7 +710,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const body = {
             token_name: tokenName,
-            max_devices: maxDevices,
             description: description
         };
         if (maxDays !== null) body.max_days = maxDays;
@@ -726,7 +722,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (res.success && res.data.token) {
             showToast(`Tạo Token "${tokenName}" thành công!`, 'success');
             tokenNameInput.value = '';
-            tokenMaxDevicesInput.value = '1';
             tokenMaxDaysInput.value = '';
             tokenDescInput.value = '';
             loadData();
@@ -747,6 +742,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const note = noteInput.value.trim();
         const duration = state.selectedDuration;
         const count = parseInt(countInput.value) || 1;
+        const maxDevices = parseInt(maxDevicesInput.value) || 1;
+        const customKeyString = customKeyInput.value.trim();
+
+        if (maxDevices < 1) {
+            showToast('Số thiết bị (Max Devices) phải lớn hơn hoặc bằng 1.', 'error');
+            maxDevicesInput.focus();
+            return;
+        }
 
         // Validate duration against token max_days
         if (!validateDurationAgainstToken()) {
@@ -761,6 +764,8 @@ document.addEventListener('DOMContentLoaded', () => {
             token_id: state.selectedTokenId,
             duration_days: duration,
             count: count,
+            max_devices: maxDevices,
+            custom_key_string: customKeyString,
             note: note
         });
 
@@ -772,6 +777,8 @@ document.addEventListener('DOMContentLoaded', () => {
             displayGeneratedKeys(keys);
             noteInput.value = '';
             countInput.value = '1';
+            maxDevicesInput.value = '1';
+            customKeyInput.value = '';
             showToast(`Tạo ${keys.length} Key thành công!`, 'success');
             loadData();
         } else {

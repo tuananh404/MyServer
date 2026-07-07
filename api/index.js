@@ -62,15 +62,10 @@ app.get('/api/health', (req, res) => {
 
 // [POST] /api/admin/create-token
 app.post('/api/admin/create-token', verifyAdmin, async (req, res) => {
-  const { token_name, max_devices, max_days, description } = req.body;
+  const { token_name, max_days, description } = req.body;
 
   if (!token_name || !token_name.trim()) {
     return res.status(400).json({ success: false, message: "token_name is required." });
-  }
-
-  const parsedMaxDevices = parseInt(max_devices) || 1;
-  if (parsedMaxDevices < 1) {
-    return res.status(400).json({ success: false, message: "max_devices must be >= 1." });
   }
 
   const token_string = `TKN_${randomAlphaNum(12)}`;
@@ -81,7 +76,6 @@ app.post('/api/admin/create-token', verifyAdmin, async (req, res) => {
       .insert([{
         token_name: token_name.trim(),
         token_string,
-        max_devices: parsedMaxDevices,
         max_days: max_days !== undefined && max_days !== null ? parseInt(max_days) : null,
         description: description || null
       }])
@@ -148,7 +142,7 @@ app.delete('/api/admin/delete-token', verifyAdmin, async (req, res) => {
 
 // [POST] /api/admin/create-key
 app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
-  const { token_id, duration_days, count, note } = req.body;
+  const { token_id, duration_days, count, note, max_devices, custom_key_string } = req.body;
 
   if (!token_id) {
     return res.status(400).json({ success: false, message: "token_id is required." });
@@ -160,6 +154,11 @@ app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
 
   const parsedDuration = parseInt(duration_days);
   const parsedCount = Math.min(Math.max(parseInt(count) || 1, 1), 50);
+  const parsedMaxDevices = parseInt(max_devices) || 1;
+
+  if (parsedMaxDevices < 1) {
+    return res.status(400).json({ success: false, message: "max_devices must be >= 1." });
+  }
 
   try {
     // Validate token exists and fetch max_days
@@ -192,18 +191,24 @@ app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
     // Generate keys
     const keysToInsert = [];
     for (let i = 0; i < parsedCount; i++) {
-      const randomPart = randomAlphaNum(8);
       let key_string;
-      if (parsedDuration === -1) {
-        key_string = `key-lifetime-${randomPart}`;
+      if (custom_key_string && custom_key_string.trim()) {
+        const trimmedCustom = custom_key_string.trim();
+        key_string = parsedCount === 1 ? trimmedCustom : `${trimmedCustom}-${i + 1}`;
       } else {
-        key_string = `key-${parsedDuration}day-${randomPart}`;
+        const randomPart = randomAlphaNum(8);
+        if (parsedDuration === -1) {
+          key_string = `key-lifetime-${randomPart}`;
+        } else {
+          key_string = `key-${parsedDuration}day-${randomPart}`;
+        }
       }
 
       keysToInsert.push({
         key_string,
         token_id: parseInt(token_id),
         duration_days: parsedDuration,
+        max_devices: parsedMaxDevices,
         status: 'unactivated',
         expires_at: null,
         note: note || null
@@ -216,7 +221,12 @@ app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
       .insert(keysToInsert)
       .select();
 
-    if (error) throw error;
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(409).json({ success: false, message: "Tên Key đã tồn tại trong hệ thống. Vui lòng chọn tên khác." });
+      }
+      throw error;
+    }
 
     return res.status(201).json({ success: true, keys: data });
   } catch (error) {
@@ -354,7 +364,7 @@ app.get('/api/admin/get-keys', verifyAdmin, async (req, res) => {
     // Fetch all keys with token info via join
     const { data: keys, error: keysError } = await supabase
       .from('keys_management')
-      .select('*, tokens(id, token_name, token_string, max_devices, max_days)')
+      .select('*, tokens(id, token_name, token_string, max_days)')
       .order('created_at', { ascending: false });
 
     if (keysError) throw keysError;
@@ -593,7 +603,7 @@ app.post('/api/client/login', async (req, res) => {
 
       const currentCount = currentDevices ? currentDevices.length : 0;
 
-      if (currentCount < tokenData.max_devices) {
+      if (currentCount < keyData.max_devices) {
         // Still room — add new device
         const { error: insertDeviceError } = await supabase
           .from('key_devices')
@@ -610,7 +620,7 @@ app.post('/api/client/login', async (req, res) => {
 
       // Device limit reached
       await supabase.from('fraud_logs').insert([
-        { hwid, reason: `Vượt giới hạn thiết bị (Key: ${key_string}, Limit: ${tokenData.max_devices})` }
+        { hwid, reason: `Vượt giới hạn thiết bị (Key: ${key_string}, Limit: ${keyData.max_devices})` }
       ]);
       return res.status(403).json({ success: false, message: "Đã đạt giới hạn thiết bị" });
     }

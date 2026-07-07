@@ -5,7 +5,6 @@ CREATE TABLE IF NOT EXISTS tokens (
     id SERIAL PRIMARY KEY,
     token_name TEXT NOT NULL,
     token_string TEXT UNIQUE NOT NULL,
-    max_devices INT NOT NULL DEFAULT 1,
     max_days INT,
     description TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -26,6 +25,7 @@ CREATE TABLE IF NOT EXISTS keys_management (
     key_string TEXT UNIQUE NOT NULL,
     token_id INT REFERENCES tokens(id) ON DELETE CASCADE,
     duration_days INT NOT NULL,
+    max_devices INT NOT NULL DEFAULT 1,
     expires_at TIMESTAMPTZ,
     status TEXT NOT NULL DEFAULT 'unactivated' CHECK (status IN ('unactivated', 'activated', 'banned', 'expired')),
     note TEXT,
@@ -53,6 +53,21 @@ BEGIN
     -- Add token_id to keys_management if it doesn't exist
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='keys_management' AND column_name='token_id') THEN
         ALTER TABLE keys_management ADD COLUMN token_id INT REFERENCES tokens(id) ON DELETE CASCADE;
+    END IF;
+
+    -- Add max_devices to keys_management if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='keys_management' AND column_name='max_devices') THEN
+        ALTER TABLE keys_management ADD COLUMN max_devices INT NOT NULL DEFAULT 1;
+    END IF;
+
+    -- Migrate max_devices value from tokens to keys_management if max_devices still exists in tokens
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tokens' AND column_name='max_devices') THEN
+        UPDATE keys_management k
+        SET max_devices = t.max_devices
+        FROM tokens t
+        WHERE k.token_id = t.id;
+
+        ALTER TABLE tokens DROP COLUMN max_devices;
     END IF;
 
     -- If the old keys_management table still has a standalone 'hwid' column, migrate its data to key_devices and drop it

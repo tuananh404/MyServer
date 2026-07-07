@@ -148,10 +148,6 @@
                             <input type="text" id="token-name-input" placeholder="VD: VIP Package" required style="padding-left:14px;">
                         </div>
                         <div class="form-group">
-                            <label for="token-max-devices-input">Max Devices</label>
-                            <input type="number" id="token-max-devices-input" min="1" value="1" style="padding-left:14px;">
-                        </div>
-                        <div class="form-group">
                             <label for="token-max-days-input">Max Days</label>
                             <input type="number" id="token-max-days-input" min="1" placeholder="Không giới hạn" style="padding-left:14px;">
                         </div>
@@ -171,7 +167,6 @@
                                 <tr>
                                     <th>Token Name</th>
                                     <th>Token String</th>
-                                    <th>Max Devices</th>
                                     <th>Max Days</th>
                                     <th>Mô tả</th>
                                     <th class="text-right">Hành động</th>
@@ -179,7 +174,7 @@
                             </thead>
                             <tbody id="tokens-table-body">
                                 <tr>
-                                    <td colspan="6" class="loading-state">
+                                    <td colspan="5" class="loading-state">
                                         <i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu...
                                     </td>
                                 </tr>
@@ -218,8 +213,8 @@
                             </div>
                         </div>
 
-                        <!-- Inputs (3-column) -->
-                        <div class="input-grid-3">
+                        <!-- Inputs Grid -->
+                        <div class="key-inputs-grid">
                             <div class="form-group">
                                 <label for="duration-input">Custom (ngày)</label>
                                 <input type="number" id="duration-input" min="-1" value="1" placeholder="15" style="padding-left:14px;">
@@ -229,6 +224,14 @@
                                 <input type="number" id="count-input" min="1" max="50" value="1" style="padding-left:14px;">
                             </div>
                             <div class="form-group">
+                                <label for="max-devices-input">Số thiết bị (Max Devices)</label>
+                                <input type="number" id="max-devices-input" min="1" value="1" style="padding-left:14px;">
+                            </div>
+                            <div class="form-group">
+                                <label for="custom-key-input">Tên Key thủ công (Optional)</label>
+                                <input type="text" id="custom-key-input" placeholder="VD: VIP-KEY-123" style="padding-left:14px;">
+                            </div>
+                            <div class="form-group grid-col-span-all">
                                 <label for="note-input">Ghi chú</label>
                                 <input type="text" id="note-input" placeholder="VD: Anh Tuấn — VIP Client" style="padding-left:14px;">
                             </div>
