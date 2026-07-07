@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const tokenForm = document.getElementById('token-form');
     const tokenNameInput = document.getElementById('token-name-input');
     const tokenMaxDaysInput = document.getElementById('token-max-days-input');
+    const tokenDisplayTextInput = document.getElementById('token-display-text-input');
     const tokenDescInput = document.getElementById('token-desc-input');
     const createTokenBtn = document.getElementById('create-token-btn');
     const tokensTableBody = document.getElementById('tokens-table-body');
@@ -262,7 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.tokensList.length === 0) {
             tokensTableBody.innerHTML = `
                 <tr>
-                    <td colspan="5" class="loading-state">
+                    <td colspan="6" class="loading-state">
                         <i class="fa-solid fa-cube" style="opacity:0.3;"></i> Chưa có Token nào
                     </td>
                 </tr>
@@ -280,6 +281,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td><strong>${escapeHTML(token.token_name)}</strong></td>
                     <td class="key-string-cell">${escapeHTML(token.token_string || token.id)}</td>
                     <td>${maxDaysDisplay}</td>
+                    <td><span style="font-size:12px; font-family:var(--font-mono); color: var(--color-primary);">${escapeHTML(token.display_text || 'ServerKey by #wtuananh6868')}</span></td>
                     <td><span style="font-size:12px; color: var(--color-text-muted);">${escapeHTML(token.description || '')}</span></td>
                     <td class="actions-cell">
                         <button class="btn btn-danger-outline btn-sm action-delete-token" data-token-id="${token.id}" title="Xóa Token">
@@ -703,6 +705,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const maxDaysVal = tokenMaxDaysInput.value.trim();
         const maxDays = maxDaysVal ? parseInt(maxDaysVal) : null;
+        const displayText = tokenDisplayTextInput.value.trim();
         const description = tokenDescInput.value.trim();
 
         createTokenBtn.disabled = true;
@@ -710,6 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const body = {
             token_name: tokenName,
+            display_text: displayText,
             description: description
         };
         if (maxDays !== null) body.max_days = maxDays;
@@ -723,6 +727,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`Tạo Token "${tokenName}" thành công!`, 'success');
             tokenNameInput.value = '';
             tokenMaxDaysInput.value = '';
+            tokenDisplayTextInput.value = '';
             tokenDescInput.value = '';
             loadData();
         } else {

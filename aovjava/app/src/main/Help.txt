@@ -1,0 +1,10 @@
+1. Add lib
+2. Add classes.dex
+3. Add Invoke code
+
+OnCreate: 
+```
+invoke-static {p0}, Lcom/mycompany/application/MainActivity;->Start(Landroid/content/Context;)V
+```
+
+How to add this Imgui Guide 

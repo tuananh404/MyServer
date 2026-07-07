@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS tokens (
     token_string TEXT UNIQUE NOT NULL,
     max_days INT,
     description TEXT,
+    display_text TEXT NOT NULL DEFAULT 'ServerKey by #wtuananh6868',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -78,6 +79,11 @@ BEGIN
         WHERE k.token_id = t.id;
 
         ALTER TABLE tokens DROP COLUMN max_devices;
+    END IF;
+
+    -- Add display_text to tokens if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tokens' AND column_name='display_text') THEN
+        ALTER TABLE tokens ADD COLUMN display_text TEXT NOT NULL DEFAULT 'ServerKey by #wtuananh6868';
     END IF;
 
     -- If the old keys_management table still has a standalone 'hwid' column, migrate its data to key_devices and drop it

@@ -62,7 +62,7 @@ app.get('/api/health', (req, res) => {
 
 // [POST] /api/admin/create-token
 app.post('/api/admin/create-token', verifyAdmin, async (req, res) => {
-  const { token_name, max_days, description } = req.body;
+  const { token_name, max_days, description, display_text } = req.body;
 
   if (!token_name || !token_name.trim()) {
     return res.status(400).json({ success: false, message: "token_name is required." });
@@ -77,7 +77,8 @@ app.post('/api/admin/create-token', verifyAdmin, async (req, res) => {
         token_name: token_name.trim(),
         token_string,
         max_days: max_days !== undefined && max_days !== null ? parseInt(max_days) : null,
-        description: description || null
+        description: description || null,
+        display_text: display_text && display_text.trim() ? display_text.trim() : "ServerKey by #wtuananh6868"
       }])
       .select()
       .single();
@@ -364,7 +365,7 @@ app.get('/api/admin/get-keys', verifyAdmin, async (req, res) => {
     // Fetch all keys with token info via join
     const { data: keys, error: keysError } = await supabase
       .from('keys_management')
-      .select('*, tokens(id, token_name, token_string, max_days)')
+      .select('*, tokens(id, token_name, token_string, max_days, display_text)')
       .order('created_at', { ascending: false });
 
     if (keysError) throw keysError;
@@ -558,7 +559,9 @@ app.post('/api/client/login', async (req, res) => {
         success: true,
         message: "Activation successful",
         token: sessionToken,
-        expires_at: expiresAt
+        expires_at: expiresAt,
+        token_name: tokenData.token_name,
+        display_text: tokenData.display_text
       });
     }
 
@@ -589,7 +592,9 @@ app.post('/api/client/login', async (req, res) => {
         return res.json({
           success: true,
           message: "Login successful",
-          expires_at: keyData.expires_at
+          expires_at: keyData.expires_at,
+          token_name: tokenData.token_name,
+          display_text: tokenData.display_text
         });
       }
 
@@ -614,7 +619,9 @@ app.post('/api/client/login', async (req, res) => {
         return res.json({
           success: true,
           message: "Login successful",
-          expires_at: keyData.expires_at
+          expires_at: keyData.expires_at,
+          token_name: tokenData.token_name,
+          display_text: tokenData.display_text
         });
       }
 

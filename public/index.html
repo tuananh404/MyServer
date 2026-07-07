@@ -152,6 +152,10 @@
                             <input type="number" id="token-max-days-input" min="1" placeholder="Không giới hạn" style="padding-left:14px;">
                         </div>
                         <div class="form-group">
+                            <label for="token-display-text-input">Display Text (Màn hình chờ)</label>
+                            <input type="text" id="token-display-text-input" placeholder="ServerKey by #wtuananh6868" style="padding-left:14px;">
+                        </div>
+                        <div class="form-group">
                             <label for="token-desc-input">Mô tả</label>
                             <input type="text" id="token-desc-input" placeholder="VD: Gói cho khách VIP" style="padding-left:14px;">
                         </div>
@@ -168,13 +172,14 @@
                                     <th>Token Name</th>
                                     <th>Token String</th>
                                     <th>Max Days</th>
+                                    <th>Display Text</th>
                                     <th>Mô tả</th>
                                     <th class="text-right">Hành động</th>
                                 </tr>
                             </thead>
                             <tbody id="tokens-table-body">
                                 <tr>
-                                    <td colspan="5" class="loading-state">
+                                    <td colspan="6" class="loading-state">
                                         <i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu...
                                     </td>
                                 </tr>
