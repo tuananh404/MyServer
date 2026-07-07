@@ -419,7 +419,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 expiryDisplay = '<span style="color: var(--color-warning); font-weight:600;">∞ Lifetime</span>';
             } else if (key.expires_at) {
                 const date = new Date(key.expires_at);
-                expiryDisplay = date.toLocaleString('vi-VN', { timeZone: 'UTC' });
+                expiryDisplay = date.toLocaleString('vi-VN');
             }
 
             // Duration display
@@ -574,7 +574,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fraudSubtitle.innerText = `Phát hiện ${state.fraudLogs.length} hoạt động đáng ngờ!`;
 
         fraudLogsList.innerHTML = state.fraudLogs.map(log => {
-            const time = new Date(log.logged_at).toLocaleString('vi-VN', { timeZone: 'UTC' });
+            const time = new Date(log.logged_at).toLocaleString('vi-VN');
             return `
                 <li class="fraud-log-item">
                     <div class="fraud-meta">
@@ -940,7 +940,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // XSS protection
     function escapeHTML(str) {
         if (!str) return '';
-        return str
+        return String(str)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')

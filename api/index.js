@@ -385,6 +385,13 @@ app.post('/api/admin/ban-key', verifyAdmin, async (req, res) => {
 // [GET] /api/admin/get-keys — Returns all keys with token info and device info
 app.get('/api/admin/get-keys', verifyAdmin, async (req, res) => {
   try {
+    // Dynamically update expired keys
+    await supabase
+      .from('keys_management')
+      .update({ status: 'expired' })
+      .eq('status', 'activated')
+      .lt('expires_at', new Date().toISOString());
+
     // Fetch all keys with token info via join
     const { data: keys, error: keysError } = await supabase
       .from('keys_management')
@@ -460,6 +467,13 @@ app.delete('/api/admin/clear-fraud', verifyAdmin, async (req, res) => {
 // [GET] /api/admin/stats — Dashboard statistics
 app.get('/api/admin/stats', verifyAdmin, async (req, res) => {
   try {
+    // Dynamically update expired keys
+    await supabase
+      .from('keys_management')
+      .update({ status: 'expired' })
+      .eq('status', 'activated')
+      .lt('expires_at', new Date().toISOString());
+
     const { data: keys, error: keysError } = await supabase
       .from('keys_management')
       .select('status');
