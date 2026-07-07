@@ -32,12 +32,22 @@ CREATE TABLE IF NOT EXISTS keys_management (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Add foreign key to key_devices referencing keys_management
-ALTER TABLE key_devices 
-    ADD CONSTRAINT fk_key_devices_key_id 
-    FOREIGN KEY (key_id) 
-    REFERENCES keys_management(id) 
-    ON DELETE CASCADE;
+-- 4. Add foreign key to key_devices referencing keys_management conditionally
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.table_constraints 
+        WHERE constraint_name = 'fk_key_devices_key_id' 
+          AND table_name = 'key_devices'
+    ) THEN
+        ALTER TABLE key_devices 
+            ADD CONSTRAINT fk_key_devices_key_id 
+            FOREIGN KEY (key_id) 
+            REFERENCES keys_management(id) 
+            ON DELETE CASCADE;
+    END IF;
+END $$;
 
 -- 5. Create fraud_logs table
 CREATE TABLE IF NOT EXISTS fraud_logs (
