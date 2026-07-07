@@ -626,7 +626,8 @@ app.post('/api/client/login', async (req, res) => {
         token: sessionToken,
         expires_at: expiresAt,
         token_name: tokenData.token_name,
-        display_text: tokenData.display_text
+        display_text: tokenData.display_text,
+        duration_days: keyData.duration_days
       });
     }
 
@@ -659,7 +660,8 @@ app.post('/api/client/login', async (req, res) => {
           message: "Login successful",
           expires_at: keyData.expires_at,
           token_name: tokenData.token_name,
-          display_text: tokenData.display_text
+          display_text: tokenData.display_text,
+          duration_days: keyData.duration_days
         });
       }
 
@@ -686,7 +688,8 @@ app.post('/api/client/login', async (req, res) => {
           message: "Login successful",
           expires_at: keyData.expires_at,
           token_name: tokenData.token_name,
-          display_text: tokenData.display_text
+          display_text: tokenData.display_text,
+          duration_days: keyData.duration_days
         });
       }
 
