@@ -1,125 +1,185 @@
-# Web Dashboard & Backend API for Licensing & Key Management
+# ServerKey Control Plane v4
 
-A complete, production-ready full-stack application built to manage user licenses (keys/tokens) and authenticate hardware IDs (HWID) directly from a client application (e.g., C++ ImGui).
+Web dashboard and API for license activation, device management, live client
+sessions, remote menu configuration, feature flags, and update policy.
 
-## 🚀 Features
+## Main capabilities
 
-- **Admin Dashboard**: Single-page web panel with premium glassmorphic styling, responsive layouts, search query filters, and a custom confirmation alert modal.
-- **Key Generator**: Quick duration presets (1 day, 3 days, 7 days, 30 days, 90 days, Lifetime) and custom duration settings with automatic copy-to-clipboard functionality.
-- **Key Management**: Dynamic list tracking Key string, Duration, Expiration date, Connected HWID device, Status, and Ghi chú (Note). Functions include resetting HWID and deleting keys.
-- **Fraud Detection Alarm**: Real-time monitoring of invalid attempts. When active fraud logs are detected, the dashboard card glows and pulses in warning red to alert the administrator.
-- **Client Auth API**: Custom endpoint with robust checks for key availability, banned status, binding HWID, counting expiration, and automatically registering fraud events.
+- Token/product packages and license-key generation
+- Multi-device license activation
+- Independent device ban/unban with automatic session revocation
+- Short-lived client sessions stored as SHA-256 token hashes
+- Heartbeat-based revocation while a client is running
+- Remote `menu_enabled`, maintenance, version, and auto-update policy
+- Dynamic feature flags for IMGUI menu groups
+- Fraud/security event log
+- Vercel-compatible Express API and static dashboard
 
----
+## Database migration
 
-## 🛠️ Installation & Setup
+Open the Supabase SQL Editor and run the complete [`supabase.sql`](./supabase.sql)
+file. The migration is idempotent and upgrades the previous v1-v3 schema.
 
-### Step 1: Database Setup (Supabase)
-1. Go to your [Supabase Dashboard](https://supabase.com/) and create a new project.
-2. Open the **SQL Editor** from the left-hand menu.
-3. Click **New Query** and copy-paste the contents of [supabase.sql](file:///storage/emulated/0/ServerKey/supabase.sql).
-4. Click **Run** to create the tables (`keys_management`, `fraud_logs`) and search indexes.
+The v4 migration adds:
 
-### Step 2: Deployment to Vercel
-You can deploy this project to Vercel with a single click by importing it from GitHub:
-1. Initialize a Git repository in the project folder and push the code to a new GitHub repository:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin <your-github-repo-url>
-   git push -u origin main
-   ```
-2. Log in to [Vercel](https://vercel.com/) and click **Add New** -> **Project**.
-3. Import your GitHub repository.
-4. Expand **Environment Variables** and enter the following settings from your `.env` configuration:
-   - `SUPABASE_URL` : (Your Supabase Project URL)
-   - `SUPABASE_SERVICE_ROLE_KEY` : (Your Supabase Service Role Key)
-   - `ADMIN_PASSWORD` : (A strong password to protect the dashboard and APIs)
-5. Click **Deploy**. Vercel will automatically set up the static files and API routing.
+- `devices`
+- `client_sessions`
+- `client_config`
+- `feature_flags`
+- structured columns on `fraud_logs`
+- the transactional `activate_client_license` database function
 
----
+Run the SQL migration before deploying the v4 API. Existing token, key, device
+binding, and fraud-log data is preserved.
 
-## 💻 Client Integration (cURL / ImGui C++)
+## Environment variables
 
-To authenticate client devices running ImGui, make a `POST` request to the client login endpoint.
+Copy `.env.example` to `.env` for local development and configure the same
+values in Vercel:
 
-### Endpoint
-`POST /api/client/login`
+```env
+SUPABASE_URL=https://PROJECT.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY
+ADMIN_PASSWORD=ADMIN_DASHBOARD_PASSWORD
+ALLOWED_ORIGINS=https://YOUR_VERCEL_DOMAIN
+PORT=3000
+NODE_ENV=development
+```
 
-### Request Body
+`ALLOWED_ORIGINS` is optional. When omitted, same-origin dashboard requests and
+native clients continue to work. Multiple browser origins are comma-separated.
+
+## Local development
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+Health check:
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+## Client activation
+
+Both routes use the v4 activation flow:
+
+- `POST /api/client/login` for compatibility
+- `POST /api/v1/client/activate` for new clients
+
+Request:
+
 ```json
 {
-  "key_string": "KEY_A1B2C3D4",
-  "hwid": "DESKTOP-9FJ84H2-HWID-UUID-8888"
+  "token_string": "TKN_PRODUCT_TOKEN",
+  "key_string": "key-30day-EXAMPLE",
+  "hwid": "HWID_DEVICE_INSTALLATION_ID",
+  "app_version": "1.0.0"
 }
 ```
 
-### JSON Responses
+Successful response:
 
-#### 1. First Activation (Successful)
-Key is valid and has status `unactivated`. It maps the HWID to the key and starts the countdown timer.
 ```json
 {
   "success": true,
-  "message": "Activation successful",
-  "token": "SESSION_J8X9H2K1L3M",
-  "expires_at": "2026-07-13T14:25:00.000Z"
+  "authorized": true,
+  "token": "SKS_SESSION_TOKEN",
+  "session_id": 12,
+  "session_expires_at": "2026-07-16T12:00:00.000Z",
+  "expires_at": "2026-08-14T12:00:00.000Z",
+  "duration_days": 30,
+  "device_id": 8,
+  "config": {
+    "menu_enabled": true,
+    "maintenance_mode": false,
+    "auto_update_enabled": false,
+    "minimum_version": "1.0.0",
+    "latest_version": "1.1.0",
+    "heartbeat_interval_seconds": 45,
+    "config_revision": 9
+  },
+  "features": {
+    "menu_vip_core": {
+      "enabled": true,
+      "locked": false,
+      "display_name": "VIP Core"
+    }
+  }
 }
 ```
 
-#### 2. Re-login Verification (Successful)
-Key is activated, the HWID matches the database record, and the key has not expired.
-```json
-{
-  "success": true,
-  "message": "Login successful",
-  "expires_at": "2026-07-13T14:25:00.000Z"
-}
+`authorized` becomes false when the global menu is disabled or maintenance mode
+is active. The client should display the server announcement and avoid entering
+its normal menu in that state.
+
+## Client heartbeat
+
+Send the raw session token as a bearer token:
+
+```http
+POST /api/v1/client/heartbeat
+Authorization: Bearer SKS_SESSION_TOKEN
+Content-Type: application/json
+
+{"app_version":"1.0.0"}
 ```
 
-#### 3. HWID Mismatch (Fraud Log Created)
-Key is valid, but the user is trying to log in from a different machine. This attempts to bypass the device lock and automatically registers an entry in `fraud_logs`.
-```json
-{
-  "success": false,
-  "message": "Key đã dùng cho máy khác"
-}
+The heartbeat returns the latest policy and feature flags. The client should use
+`heartbeat_interval_seconds`, with a minimum of 15 seconds. A banned device,
+banned/expired license, revoked session, maintenance state, or disabled menu is
+reported on the next heartbeat.
+
+Logout:
+
+```http
+POST /api/v1/client/logout
+Authorization: Bearer SKS_SESSION_TOKEN
 ```
 
-#### 4. Invalid Key (Fraud Log Created)
-Key string does not exist in the database. Registers a fraud alert log.
-```json
-{
-  "success": false,
-  "message": "Invalid Key"
-}
+## Admin API
+
+The dashboard exchanges the admin password for a signed 12-hour session:
+
+```http
+POST /api/admin/login
+Content-Type: application/json
+
+{"password":"ADMIN_PASSWORD"}
 ```
 
-#### 5. Expired / Banned
-The license has either passed the expiration deadline or has been blacklisted by the owner.
-```json
-{
-  "success": false,
-  "message": "Key has expired" // Or "Key has been banned"
-}
+Use the returned token on admin routes:
+
+```http
+Authorization: Bearer ADM_SIGNED_SESSION_TOKEN
 ```
 
----
+Control-plane endpoints:
 
-## ⚙️ Local Development (Optional)
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/admin/control-config` | Load remote policy and feature flags |
+| PATCH | `/api/admin/control-config` | Update menu, maintenance, version, and update policy |
+| POST | `/api/admin/feature-flag` | Create or update a feature flag |
+| DELETE | `/api/admin/feature-flag` | Delete a feature flag |
+| GET | `/api/admin/devices` | List devices, linked licenses, and active sessions |
+| POST | `/api/admin/device-status` | Ban or unban one device |
+| GET | `/api/admin/sessions` | List recent client sessions |
+| POST | `/api/admin/revoke-session` | Revoke a running client session |
 
-To run the application locally on your machine:
-1. Install Node.js on your computer.
-2. In the root directory, create a `.env` file from the `.env.example` template:
-   ```bash
-   cp .env.example .env
-   ```
-3. Open `.env` and fill in your Supabase connection parameters and Admin password.
-4. Install dependencies and start the local Node.js server:
-   ```bash
-   npm install
-   npm run dev
-   ```
-5. Open your web browser and navigate to `http://localhost:3000` to access the Dashboard, or use `curl` to test `/api/client/login`.
+Existing token, key, stats, and fraud-log admin routes remain compatible.
+
+## Vercel deployment
+
+1. Run `supabase.sql` in the target Supabase project.
+2. Push this repository to GitHub.
+3. Import the repository into Vercel.
+4. Add the environment variables listed above.
+5. Deploy and verify `/api/health` reports `status: ok` and version `4.0.0`.
+
+The GitHub/Vercel integration will redeploy automatically after later pushes to
+the configured production branch.

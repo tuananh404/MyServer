@@ -130,10 +130,204 @@
                         <span class="stat-label">Token Packages</span>
                     </div>
                 </div>
+                <div class="stat-card glass-card" id="stat-devices">
+                    <div class="stat-icon stat-icon-total">
+                        <i class="fa-solid fa-mobile-screen"></i>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-number" data-stat="devices">0</span>
+                        <span class="stat-label">Thiết bị</span>
+                    </div>
+                </div>
+                <div class="stat-card glass-card" id="stat-sessions">
+                    <div class="stat-icon stat-icon-active">
+                        <i class="fa-solid fa-satellite-dish"></i>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-number" data-stat="activeSessions">0</span>
+                        <span class="stat-label">Sessions online</span>
+                    </div>
+                </div>
             </div>
 
             <!-- GRID SYSTEM -->
             <main class="dashboard-grid">
+
+                <!-- REMOTE CLIENT CONTROL -->
+                <section class="glass-card grid-col-full card-fade-up control-plane-card">
+                    <div class="card-header table-card-header">
+                        <div>
+                            <h2><i class="fa-solid fa-tower-broadcast text-gradient"></i> Remote Client Control</h2>
+                            <p>Policy trung tâm cho IMGUI, phiên bản client và cập nhật tự động</p>
+                        </div>
+                        <span id="config-revision" class="revision-badge">Revision —</span>
+                    </div>
+
+                    <div class="control-toggle-grid">
+                        <label class="control-toggle-card" for="menu-enabled-input">
+                            <span class="control-toggle-copy">
+                                <strong>Menu Enabled</strong>
+                                <small>Cho phép client mở giao diện sau xác thực</small>
+                            </span>
+                            <input type="checkbox" id="menu-enabled-input">
+                            <span class="switch-track"></span>
+                        </label>
+                        <label class="control-toggle-card" for="maintenance-mode-input">
+                            <span class="control-toggle-copy">
+                                <strong>Maintenance Mode</strong>
+                                <small>Khóa toàn bộ client nhưng vẫn cho heartbeat</small>
+                            </span>
+                            <input type="checkbox" id="maintenance-mode-input">
+                            <span class="switch-track"></span>
+                        </label>
+                        <label class="control-toggle-card" for="auto-update-enabled-input">
+                            <span class="control-toggle-copy">
+                                <strong>Auto Update</strong>
+                                <small>Bật hoặc khóa policy cập nhật từ xa</small>
+                            </span>
+                            <input type="checkbox" id="auto-update-enabled-input">
+                            <span class="switch-track"></span>
+                        </label>
+                    </div>
+
+                    <form id="remote-control-form" class="remote-control-grid">
+                        <div class="form-group">
+                            <label for="minimum-version-input">Minimum Version</label>
+                            <input type="text" id="minimum-version-input" placeholder="1.0.0">
+                        </div>
+                        <div class="form-group">
+                            <label for="latest-version-input">Latest Version</label>
+                            <input type="text" id="latest-version-input" placeholder="1.0.0">
+                        </div>
+                        <div class="form-group">
+                            <label for="heartbeat-interval-input">Heartbeat (giây)</label>
+                            <input type="number" id="heartbeat-interval-input" min="15" max="3600" value="45">
+                        </div>
+                        <div class="form-group grid-col-span-all">
+                            <label for="update-url-input">Update URL (HTTPS)</label>
+                            <input type="url" id="update-url-input" placeholder="https://example.com/releases/latest">
+                        </div>
+                        <div class="form-group grid-col-span-all">
+                            <label for="announcement-input">Thông báo hiển thị trên client</label>
+                            <textarea id="announcement-input" rows="3" maxlength="1000" placeholder="Thông báo bảo trì, changelog hoặc nội dung dành cho người dùng..."></textarea>
+                        </div>
+                    </form>
+                    <div class="control-actions">
+                        <span id="control-save-status" class="save-status">Chưa có thay đổi</span>
+                        <button id="save-control-btn" class="btn btn-primary btn-glow">
+                            <i class="fa-solid fa-floppy-disk"></i>
+                            <span>Lưu Remote Policy</span>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- FEATURE FLAGS -->
+                <section class="glass-card grid-col-full card-fade-up">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-sliders text-gradient"></i> Menu & Feature Flags</h2>
+                        <p>Client tự bỏ qua các key chưa hỗ trợ, nên có thể thêm flag mới an toàn</p>
+                    </div>
+
+                    <form id="feature-flag-form" class="feature-form-grid">
+                        <div class="form-group">
+                            <label for="feature-key-input">Feature Key</label>
+                            <input type="text" id="feature-key-input" pattern="[a-z][a-z0-9_]{1,63}" placeholder="menu_example">
+                        </div>
+                        <div class="form-group">
+                            <label for="feature-name-input">Tên hiển thị</label>
+                            <input type="text" id="feature-name-input" maxlength="100" placeholder="Example Menu">
+                        </div>
+                        <div class="form-group">
+                            <label for="feature-sort-input">Thứ tự</label>
+                            <input type="number" id="feature-sort-input" value="0">
+                        </div>
+                        <div class="form-group grid-col-span-all">
+                            <label for="feature-description-input">Mô tả</label>
+                            <input type="text" id="feature-description-input" maxlength="300" placeholder="Flag này điều khiển phần nào trên client">
+                        </div>
+                        <label class="inline-check"><input type="checkbox" id="feature-enabled-input" checked> Enabled</label>
+                        <label class="inline-check"><input type="checkbox" id="feature-locked-input"> Locked</label>
+                        <button type="submit" id="save-feature-btn" class="btn btn-primary">
+                            <i class="fa-solid fa-plus"></i> Lưu Flag
+                        </button>
+                    </form>
+
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Feature Key</th>
+                                    <th>Tên hiển thị</th>
+                                    <th>Mô tả</th>
+                                    <th>Enabled</th>
+                                    <th>Locked</th>
+                                    <th>Thứ tự</th>
+                                    <th class="text-right">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody id="feature-flags-table-body">
+                                <tr><td colspan="7" class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải flags...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- DEVICE REGISTRY -->
+                <section class="glass-card grid-col-full card-fade-up">
+                    <div class="card-header table-card-header">
+                        <div>
+                            <h2><i class="fa-solid fa-mobile-screen-button text-gradient"></i> Device Registry</h2>
+                            <p>Thiết bị, phiên bản, license liên kết và trạng thái khóa</p>
+                        </div>
+                        <input type="search" id="device-search-input" class="compact-search" placeholder="Tìm Device ID hoặc Key...">
+                    </div>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Device ID</th>
+                                    <th>Version</th>
+                                    <th>Licenses</th>
+                                    <th>Sessions</th>
+                                    <th>Last Seen</th>
+                                    <th>Trạng thái</th>
+                                    <th>Lý do</th>
+                                    <th class="text-right">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody id="devices-table-body">
+                                <tr><td colspan="8" class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải thiết bị...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- LIVE CLIENT SESSIONS -->
+                <section class="glass-card grid-col-full card-fade-up">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-satellite-dish text-gradient"></i> Client Sessions</h2>
+                        <p>Heartbeat gần nhất và quyền truy cập hiện tại</p>
+                    </div>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Session</th>
+                                    <th>Device</th>
+                                    <th>License</th>
+                                    <th>Version</th>
+                                    <th>Last Seen</th>
+                                    <th>Hết hạn phiên</th>
+                                    <th>Trạng thái</th>
+                                    <th class="text-right">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sessions-table-body">
+                                <tr><td colspan="8" class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải sessions...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
 
                 <!-- TOKEN MANAGEMENT CARD -->
                 <section class="glass-card grid-col-full card-fade-up" id="token-management-card">
@@ -330,7 +524,7 @@
             <!-- FOOTER -->
             <footer class="dashboard-footer">
                 <span>© 2026 Admin Panel — Key Management System</span>
-                <span class="footer-version">v3.0</span>
+                <span class="footer-version">v4.0</span>
             </footer>
         </div>
 

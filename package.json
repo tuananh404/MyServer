@@ -1,11 +1,12 @@
 {
   "name": "imgui-license-dashboard",
-  "version": "1.0.0",
-  "description": "Full-stack Web Panel Dashboard and Backend API for ImGui key authentication.",
+  "version": "4.0.0",
+  "description": "ServerKey web control plane for licenses, devices, sessions, remote policy, and feature flags.",
   "main": "api/index.js",
   "scripts": {
     "start": "node api/index.js",
-    "dev": "node api/index.js"
+    "dev": "node api/index.js",
+    "check": "node --check api/index.js && node --check public/app.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
@@ -14,6 +15,6 @@
     "express": "^4.18.2"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   }
 }

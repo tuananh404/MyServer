@@ -1,13 +1,26 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const app = express();
 
-// Enable CORS for all origins (cURL and ImGui client access)
-app.use(cors());
+// Native clients do not rely on browser CORS. The dashboard is same-origin in
+// production; optional extra origins can be provided as a comma-separated env.
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Origin is not allowed by CORS'));
+  }
+}));
 app.use(express.json());
 
 // Initialize Supabase Client
@@ -22,7 +35,57 @@ if (!supabaseUrl || !supabaseKey) {
   console.log(`[SERVER] Supabase connected: ${supabaseUrl}`);
 }
 
-const supabase = createClient(supabaseUrl || '', supabaseKey || '');
+const supabase = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    })
+  : null;
+
+function safeEqualText(left, right) {
+  const leftBuffer = Buffer.from(String(left));
+  const rightBuffer = Buffer.from(String(right));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function createAdminSessionToken(adminPassword) {
+  const payload = Buffer.from(JSON.stringify({
+    exp: Date.now() + 12 * 60 * 60 * 1000,
+    nonce: crypto.randomBytes(12).toString('hex')
+  })).toString('base64url');
+  const signature = crypto.createHmac('sha256', adminPassword).update(payload).digest('base64url');
+  return `ADM_${payload}.${signature}`;
+}
+
+function verifyAdminSessionToken(token, adminPassword) {
+  if (!token.startsWith('ADM_')) return false;
+  const separator = token.lastIndexOf('.');
+  if (separator < 5) return false;
+  const payload = token.slice(4, separator);
+  const signature = token.slice(separator + 1);
+  const expected = crypto.createHmac('sha256', adminPassword).update(payload).digest('base64url');
+  if (!safeEqualText(signature, expected)) return false;
+
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return Number(decoded.exp) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+const adminLoginAttempts = new Map();
+function allowAdminLogin(ip) {
+  const now = Date.now();
+  const key = ip || 'unknown';
+  const current = adminLoginAttempts.get(key);
+  if (!current || now >= current.resetAt) {
+    adminLoginAttempts.set(key, { count: 1, resetAt: now + 15 * 60 * 1000 });
+    return true;
+  }
+  if (current.count >= 10) return false;
+  current.count += 1;
+  return true;
+}
 
 // Middleware to verify admin authorization header
 const verifyAdmin = (req, res, next) => {
@@ -33,7 +96,10 @@ const verifyAdmin = (req, res, next) => {
     return res.status(500).json({ success: false, message: "Server configuration error: ADMIN_PASSWORD not set." });
   }
 
-  if (!authHeader || authHeader !== `Bearer ${adminPassword}`) {
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const validPassword = bearerToken && safeEqualText(bearerToken, adminPassword);
+  const validSession = bearerToken && verifyAdminSessionToken(bearerToken, adminPassword);
+  if (!validPassword && !validSession) {
     return res.status(401).json({ success: false, message: "Unauthorized: Invalid admin password." });
   }
   next();
@@ -61,11 +127,79 @@ function apiWrapper(handler) {
 // Helper: generate random alphanumeric string
 function randomAlphaNum(length) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  const bytes = crypto.randomBytes(length);
+  return Array.from(bytes, byte => chars[byte % chars.length]).join('');
+}
+
+function randomSessionToken() {
+  return `SKS_${crypto.randomBytes(32).toString('base64url')}`;
+}
+
+function hashSessionToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0].trim().slice(0, 128);
   }
-  return result;
+  return String(req.socket?.remoteAddress || '').slice(0, 128) || null;
+}
+
+function sanitizeString(value, maxLength, fallback = '') {
+  if (typeof value !== 'string') return fallback;
+  return value.trim().slice(0, maxLength);
+}
+
+async function getClientPolicy() {
+  const [{ data: config, error: configError }, { data: flags, error: flagsError }] = await Promise.all([
+    supabase.from('client_config').select('*').eq('id', 1).single(),
+    supabase.from('feature_flags').select('feature_key, display_name, description, enabled, locked, sort_order').order('sort_order')
+  ]);
+
+  if (configError) throw configError;
+  if (flagsError) throw flagsError;
+
+  return {
+    config,
+    features: Object.fromEntries((flags || []).map(flag => [flag.feature_key, {
+      enabled: flag.enabled,
+      locked: flag.locked,
+      display_name: flag.display_name,
+      description: flag.description || '',
+      sort_order: flag.sort_order || 0
+    }]))
+  };
+}
+
+async function bumpConfigRevision() {
+  const { data, error } = await supabase
+    .from('client_config')
+    .select('config_revision')
+    .eq('id', 1)
+    .single();
+  if (error) throw error;
+
+  const nextRevision = Number(data.config_revision || 0) + 1;
+  const { error: updateError } = await supabase
+    .from('client_config')
+    .update({ config_revision: nextRevision, updated_at: new Date().toISOString() })
+    .eq('id', 1);
+  if (updateError) throw updateError;
+  return nextRevision;
+}
+
+async function recordSecurityEvent({ hwid, reason, eventType, keyId = null, deviceId = null, metadata = {} }) {
+  const { error } = await supabase.from('fraud_logs').insert([{
+    hwid: hwid || 'unknown',
+    reason,
+    event_type: eventType,
+    key_id: keyId,
+    device_id: deviceId,
+    metadata
+  }]);
+  if (error) console.error('[SECURITY EVENT]', error.message || error);
 }
 
 // ==========================================
@@ -75,8 +209,60 @@ app.get('/api', (req, res) => {
   res.json({ status: "ok", message: "Key Management API is operational.", timestamp: new Date().toISOString() });
 });
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: "ok", message: "Key Management API is operational.", timestamp: new Date().toISOString() });
+app.get('/api/health', async (req, res) => {
+  const databaseConfigured = Boolean(supabase);
+  if (!databaseConfigured) {
+    return res.status(503).json({
+      status: 'degraded',
+      database_configured: false,
+      schema_ready: false,
+      version: '4.0.0',
+      message: 'Database environment variables are missing.',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  const { error: schemaError } = await supabase
+    .from('client_config')
+    .select('config_revision')
+    .eq('id', 1)
+    .maybeSingle();
+  const schemaReady = !schemaError;
+  return res.status(schemaReady ? 200 : 503).json({
+    status: schemaReady ? 'ok' : 'migration_required',
+    database_configured: true,
+    schema_ready: schemaReady,
+    version: '4.0.0',
+    message: schemaReady ? 'ServerKey control plane is operational.' : 'Run supabase.sql to install the v4 database schema.',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.post('/api/admin/login', (req, res) => {
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  const suppliedPassword = typeof req.body.password === 'string' ? req.body.password : '';
+  if (!allowAdminLogin(getClientIp(req))) {
+    return res.status(429).json({ success: false, message: 'Too many login attempts. Try again later.' });
+  }
+  if (!adminPassword) {
+    return res.status(500).json({ success: false, message: 'ADMIN_PASSWORD is not configured.' });
+  }
+  if (!suppliedPassword || !safeEqualText(suppliedPassword, adminPassword)) {
+    return res.status(401).json({ success: false, message: 'Invalid admin password.' });
+  }
+  return res.json({ success: true, token: createAdminSessionToken(adminPassword), expires_in: 43200 });
+});
+
+// All database-backed APIs fail cleanly instead of crashing the whole function
+// when Vercel environment variables have not been configured yet.
+app.use(['/api/admin', '/api/client', '/api/v1/client'], (req, res, next) => {
+  if (!supabase) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.'
+    });
+  }
+  next();
 });
 
 // ==========================================
@@ -419,6 +605,9 @@ app.get('/api/admin/get-keys', verifyAdmin, async (req, res) => {
     // Enrich keys with device info
     const enrichedKeys = keys.map(key => ({
       ...key,
+      token_name: key.tokens?.token_name || null,
+      token_string: key.tokens?.token_string || null,
+      token_display_text: key.tokens?.display_text || null,
       device_count: (deviceMap[key.id] || []).length,
       hwids: deviceMap[key.id] || []
     }));
@@ -492,6 +681,15 @@ app.get('/api/admin/stats', verifyAdmin, async (req, res) => {
 
     if (tokensError) throw tokensError;
 
+    const [{ data: devices, error: devicesError }, { data: sessions, error: sessionsError }] = await Promise.all([
+      supabase.from('devices').select('id, status'),
+      supabase.from('client_sessions').select('id, status, expires_at')
+    ]);
+    if (devicesError) throw devicesError;
+    if (sessionsError) throw sessionsError;
+
+    const now = new Date();
+
     const stats = {
       totalTokens: tokens.length,
       total: keys.length,
@@ -499,13 +697,267 @@ app.get('/api/admin/stats', verifyAdmin, async (req, res) => {
       activated: keys.filter(k => k.status === 'activated').length,
       expired: keys.filter(k => k.status === 'expired').length,
       banned: keys.filter(k => k.status === 'banned').length,
-      fraudAlerts: fraudLogs.length
+      fraudAlerts: fraudLogs.length,
+      devices: devices.length,
+      bannedDevices: devices.filter(device => device.status === 'banned').length,
+      activeSessions: sessions.filter(session => session.status === 'active' && new Date(session.expires_at) > now).length
     };
 
     return res.json({ success: true, stats });
   } catch (error) {
     console.error("Error fetching stats:", error);
     return res.status(500).json({ success: false, message: "Database error while fetching stats." });
+  }
+});
+
+// ==========================================
+// CONTROL PLANE ADMIN ENDPOINTS (v4)
+// ==========================================
+
+app.get('/api/admin/control-config', verifyAdmin, async (req, res) => {
+  try {
+    const policy = await getClientPolicy();
+    return res.json({ success: true, ...policy });
+  } catch (error) {
+    console.error('[CONTROL CONFIG] Fetch failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not load client control configuration.' });
+  }
+});
+
+app.patch('/api/admin/control-config', verifyAdmin, async (req, res) => {
+  const heartbeat = Number.parseInt(req.body.heartbeat_interval_seconds, 10);
+  const update = {
+    menu_enabled: Boolean(req.body.menu_enabled),
+    maintenance_mode: Boolean(req.body.maintenance_mode),
+    auto_update_enabled: Boolean(req.body.auto_update_enabled),
+    minimum_version: sanitizeString(req.body.minimum_version, 32, '1.0.0'),
+    latest_version: sanitizeString(req.body.latest_version, 32, '1.0.0'),
+    update_url: sanitizeString(req.body.update_url, 500) || null,
+    heartbeat_interval_seconds: Number.isInteger(heartbeat) && heartbeat >= 15 && heartbeat <= 3600 ? heartbeat : 45,
+    announcement: sanitizeString(req.body.announcement, 1000) || null,
+    updated_at: new Date().toISOString()
+  };
+
+  if (update.update_url && !/^https:\/\//i.test(update.update_url)) {
+    return res.status(400).json({ success: false, message: 'update_url must use HTTPS.' });
+  }
+
+  try {
+    const { data: current, error: currentError } = await supabase
+      .from('client_config')
+      .select('config_revision')
+      .eq('id', 1)
+      .single();
+    if (currentError) throw currentError;
+
+    update.config_revision = Number(current.config_revision || 0) + 1;
+    const { data, error } = await supabase
+      .from('client_config')
+      .update(update)
+      .eq('id', 1)
+      .select()
+      .single();
+    if (error) throw error;
+
+    return res.json({ success: true, config: data });
+  } catch (error) {
+    console.error('[CONTROL CONFIG] Update failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not update client control configuration.' });
+  }
+});
+
+app.post('/api/admin/feature-flag', verifyAdmin, async (req, res) => {
+  const featureKey = sanitizeString(req.body.feature_key, 64).toLowerCase();
+  const displayName = sanitizeString(req.body.display_name, 100);
+  const description = sanitizeString(req.body.description, 300) || null;
+  const sortOrder = Number.parseInt(req.body.sort_order, 10) || 0;
+
+  if (!/^[a-z][a-z0-9_]{1,63}$/.test(featureKey) || !displayName) {
+    return res.status(400).json({
+      success: false,
+      message: 'feature_key must be lowercase snake_case and display_name is required.'
+    });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('feature_flags')
+      .upsert({
+        feature_key: featureKey,
+        display_name: displayName,
+        description,
+        enabled: req.body.enabled !== false,
+        locked: Boolean(req.body.locked),
+        sort_order: sortOrder,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'feature_key' })
+      .select()
+      .single();
+    if (error) throw error;
+    const revision = await bumpConfigRevision();
+    return res.json({ success: true, feature: data, config_revision: revision });
+  } catch (error) {
+    console.error('[FEATURE FLAG] Upsert failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not save feature flag.' });
+  }
+});
+
+app.delete('/api/admin/feature-flag', verifyAdmin, async (req, res) => {
+  const featureKey = sanitizeString(req.body.feature_key, 64).toLowerCase();
+  if (!featureKey) {
+    return res.status(400).json({ success: false, message: 'feature_key is required.' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('feature_flags')
+      .delete()
+      .eq('feature_key', featureKey)
+      .select();
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      return res.status(404).json({ success: false, message: 'Feature flag not found.' });
+    }
+    const revision = await bumpConfigRevision();
+    return res.json({ success: true, config_revision: revision });
+  } catch (error) {
+    console.error('[FEATURE FLAG] Delete failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not delete feature flag.' });
+  }
+});
+
+app.get('/api/admin/devices', verifyAdmin, async (req, res) => {
+  try {
+    const [deviceResult, bindingResult, keyResult, sessionResult] = await Promise.all([
+      supabase.from('devices').select('*').order('last_seen_at', { ascending: false }),
+      supabase.from('key_devices').select('key_id, hwid, activated_at'),
+      supabase.from('keys_management').select('id, key_string, status, expires_at'),
+      supabase.from('client_sessions').select('device_id, status')
+    ]);
+
+    for (const result of [deviceResult, bindingResult, keyResult, sessionResult]) {
+      if (result.error) throw result.error;
+    }
+
+    const keyMap = new Map((keyResult.data || []).map(key => [key.id, key]));
+    const bindingMap = new Map();
+    for (const binding of bindingResult.data || []) {
+      if (!bindingMap.has(binding.hwid)) bindingMap.set(binding.hwid, []);
+      const key = keyMap.get(binding.key_id);
+      if (key) bindingMap.get(binding.hwid).push({ ...key, activated_at: binding.activated_at });
+    }
+    const activeSessionCounts = new Map();
+    for (const session of sessionResult.data || []) {
+      if (session.status === 'active') {
+        activeSessionCounts.set(session.device_id, (activeSessionCounts.get(session.device_id) || 0) + 1);
+      }
+    }
+
+    const devices = (deviceResult.data || []).map(device => ({
+      ...device,
+      licenses: bindingMap.get(device.hwid) || [],
+      active_sessions: activeSessionCounts.get(device.id) || 0
+    }));
+    return res.json({ success: true, devices });
+  } catch (error) {
+    console.error('[DEVICES] Fetch failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not load devices.' });
+  }
+});
+
+app.post('/api/admin/device-status', verifyAdmin, async (req, res) => {
+  const deviceId = Number.parseInt(req.body.device_id, 10);
+  const status = req.body.status === 'banned' ? 'banned' : req.body.status === 'active' ? 'active' : '';
+  const reason = sanitizeString(req.body.reason, 300) || null;
+  if (!deviceId || !status) {
+    return res.status(400).json({ success: false, message: 'Valid device_id and status are required.' });
+  }
+
+  try {
+    const update = {
+      status,
+      ban_reason: status === 'banned' ? reason : null,
+      banned_at: status === 'banned' ? new Date().toISOString() : null
+    };
+    const { data, error } = await supabase
+      .from('devices')
+      .update(update)
+      .eq('id', deviceId)
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ success: false, message: 'Device not found.' });
+
+    if (status === 'banned') {
+      const { error: revokeError } = await supabase
+        .from('client_sessions')
+        .update({ status: 'revoked' })
+        .eq('device_id', deviceId)
+        .eq('status', 'active');
+      if (revokeError) throw revokeError;
+      await recordSecurityEvent({
+        hwid: data.hwid,
+        reason: reason || 'Device banned by administrator',
+        eventType: 'device_banned',
+        deviceId
+      });
+    }
+
+    return res.json({ success: true, device: data });
+  } catch (error) {
+    console.error('[DEVICE STATUS] Update failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not update device status.' });
+  }
+});
+
+app.get('/api/admin/sessions', verifyAdmin, async (req, res) => {
+  try {
+    await supabase
+      .from('client_sessions')
+      .update({ status: 'expired' })
+      .eq('status', 'active')
+      .lt('expires_at', new Date().toISOString());
+
+    const [sessionResult, deviceResult, keyResult] = await Promise.all([
+      supabase.from('client_sessions').select('id, key_id, device_id, status, created_at, last_seen_at, expires_at').order('last_seen_at', { ascending: false }).limit(500),
+      supabase.from('devices').select('id, hwid, status, app_version'),
+      supabase.from('keys_management').select('id, key_string, status')
+    ]);
+    for (const result of [sessionResult, deviceResult, keyResult]) {
+      if (result.error) throw result.error;
+    }
+
+    const deviceMap = new Map((deviceResult.data || []).map(device => [device.id, device]));
+    const keyMap = new Map((keyResult.data || []).map(key => [key.id, key]));
+    const sessions = (sessionResult.data || []).map(session => ({
+      ...session,
+      device: deviceMap.get(session.device_id) || null,
+      license: keyMap.get(session.key_id) || null
+    }));
+    return res.json({ success: true, sessions });
+  } catch (error) {
+    console.error('[SESSIONS] Fetch failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not load sessions.' });
+  }
+});
+
+app.post('/api/admin/revoke-session', verifyAdmin, async (req, res) => {
+  const sessionId = Number.parseInt(req.body.session_id, 10);
+  if (!sessionId) return res.status(400).json({ success: false, message: 'session_id is required.' });
+
+  try {
+    const { data, error } = await supabase
+      .from('client_sessions')
+      .update({ status: 'revoked' })
+      .eq('id', sessionId)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ success: false, message: 'Session not found.' });
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[SESSION] Revoke failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not revoke session.' });
   }
 });
 
@@ -539,193 +991,198 @@ function checkClientRateLimit(hwid) {
 }
 
 // Garbage-collect expired rate limit records every 60s
-setInterval(() => {
+const rateLimitCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [k, v] of loginRateLimit) {
     if (now > v.resetTime + 60000) loginRateLimit.delete(k);
   }
 }, 60000);
+if (typeof rateLimitCleanupTimer.unref === 'function') rateLimitCleanupTimer.unref();
 
-// [POST] /api/client/login
-app.post('/api/client/login', async (req, res) => {
-  const { token_string, key_string, hwid } = req.body;
+const activationErrors = {
+  invalid_token: [403, 'Invalid Token'],
+  invalid_key: [403, 'Invalid Key'],
+  license_banned: [403, 'Key has been banned'],
+  license_expired: [403, 'Key has expired'],
+  device_banned: [403, 'Device has been banned'],
+  device_limit: [403, 'Đã đạt giới hạn thiết bị']
+};
 
-  console.log(`[CLIENT LOGIN] Request: token="${token_string}", key="${key_string}", hwid="${hwid}"`);
+async function handleClientActivation(req, res) {
+  const tokenString = sanitizeString(req.body.token_string, 128);
+  const keyString = sanitizeString(req.body.key_string, 256);
+  const hwid = sanitizeString(req.body.hwid, 256);
+  const appVersion = sanitizeString(req.body.app_version, 32) || null;
 
-  if (!token_string || !key_string || !hwid) {
-    console.log(`[CLIENT LOGIN] Missing fields: token=${!!token_string}, key=${!!key_string}, hwid=${!!hwid}`);
-    return res.status(400).json({ success: false, message: "token_string, key_string, and hwid are required." });
+  if (!tokenString || !keyString || !hwid) {
+    return res.status(400).json({ success: false, message: 'token_string, key_string, and hwid are required.' });
   }
-
-  // Basic rate limiting
   if (!checkClientRateLimit(hwid)) {
-    console.log(`[CLIENT LOGIN] Rate limited: hwid="${hwid}"`);
-    return res.status(429).json({ success: false, message: "Too many requests. Please wait." });
+    return res.status(429).json({ success: false, message: 'Too many requests. Please wait.' });
   }
 
   try {
-    // Step 1: Find the token by token_string
-    const { data: tokenData, error: tokenError } = await supabase
-      .from('tokens')
-      .select('*')
-      .eq('token_string', token_string)
-      .maybeSingle();
+    const { data: activation, error: activationError } = await supabase.rpc('activate_client_license', {
+      p_token_string: tokenString,
+      p_key_string: keyString,
+      p_hwid: hwid,
+      p_app_version: appVersion,
+      p_ip: getClientIp(req)
+    });
+    if (activationError) throw activationError;
 
-    if (tokenError) throw tokenError;
-
-    if (!tokenData) {
-      return res.status(403).json({ success: false, message: "Invalid Token" });
-    }
-
-    // Step 2: Find the key by key_string
-    const { data: keyData, error: keyError } = await supabase
-      .from('keys_management')
-      .select('*')
-      .eq('key_string', key_string)
-      .maybeSingle();
-
-    if (keyError) throw keyError;
-
-    if (!keyData) {
-      await supabase.from('fraud_logs').insert([
-        { hwid, reason: `Sai Key (Attempted Key: ${key_string})` }
-      ]);
-      return res.status(403).json({ success: false, message: "Invalid Key" });
-    }
-
-    // Step 3: Verify key.token_id matches token.id
-    if (keyData.token_id !== tokenData.id) {
-      await supabase.from('fraud_logs').insert([
-        { hwid, reason: `Key không thuộc Token (Key: ${key_string}, Token: ${token_string})` }
-      ]);
-      return res.status(403).json({ success: false, message: "Key không thuộc Token này" });
-    }
-
-    // Step 4: Check banned
-    if (keyData.status === 'banned') {
-      return res.status(403).json({ success: false, message: "Key has been banned" });
-    }
-
-    // Step 5: If unactivated → activate
-    if (keyData.status === 'unactivated') {
-      let expiresAt = null;
-
-      // -1 means lifetime key
-      if (keyData.duration_days > 0) {
-        const expDate = new Date();
-        expDate.setDate(expDate.getDate() + keyData.duration_days);
-        expiresAt = expDate.toISOString();
-      }
-
-      // Update key status to activated
-      const { error: updateError } = await supabase
-        .from('keys_management')
-        .update({ status: 'activated', expires_at: expiresAt })
-        .eq('id', keyData.id);
-
-      if (updateError) throw updateError;
-
-      // Insert device into key_devices
-      const { error: deviceError } = await supabase
-        .from('key_devices')
-        .insert([{ key_id: keyData.id, hwid }]);
-
-      if (deviceError) throw deviceError;
-
-      const sessionToken = `SESSION_${Math.random().toString(36).substring(2, 15).toUpperCase()}`;
-
-      return res.json({
-        success: true,
-        message: "Activation successful",
-        token: sessionToken,
-        expires_at: expiresAt,
-        token_name: tokenData.token_name,
-        display_text: tokenData.display_text,
-        duration_days: keyData.duration_days
+    if (!activation?.ok) {
+      const [status, message] = activationErrors[activation?.code] || [403, 'Activation denied'];
+      await recordSecurityEvent({
+        hwid,
+        reason: `${message} (${activation?.code || 'unknown'})`,
+        eventType: activation?.code || 'activation_denied',
+        keyId: activation?.key_id || null,
+        deviceId: activation?.device_id || null,
+        metadata: { app_version: appVersion }
+      });
+      return res.status(status).json({
+        success: false,
+        code: activation?.code || 'activation_denied',
+        message: activation?.reason || message
       });
     }
 
-    // Step 6: If activated
-    if (keyData.status === 'activated') {
-      // Check expiry first
-      if (keyData.expires_at && new Date() > new Date(keyData.expires_at)) {
-        await supabase
-          .from('keys_management')
-          .update({ status: 'expired' })
-          .eq('id', keyData.id);
-
-        return res.status(403).json({ success: false, message: "Key has expired" });
-      }
-
-      // Check if this hwid already exists in key_devices for this key
-      const { data: existingDevice, error: existingDeviceError } = await supabase
-        .from('key_devices')
-        .select('id')
-        .eq('key_id', keyData.id)
-        .eq('hwid', hwid)
-        .maybeSingle();
-
-      if (existingDeviceError) throw existingDeviceError;
-
-      if (existingDevice) {
-        // HWID already registered — login successful
-        return res.json({
-          success: true,
-          message: "Login successful",
-          expires_at: keyData.expires_at,
-          token_name: tokenData.token_name,
-          display_text: tokenData.display_text,
-          duration_days: keyData.duration_days
-        });
-      }
-
-      // HWID not found — check device count
-      const { data: currentDevices, error: countError } = await supabase
-        .from('key_devices')
-        .select('id')
-        .eq('key_id', keyData.id);
-
-      if (countError) throw countError;
-
-      const currentCount = currentDevices ? currentDevices.length : 0;
-
-      if (currentCount < keyData.max_devices) {
-        // Still room — add new device
-        const { error: insertDeviceError } = await supabase
-          .from('key_devices')
-          .insert([{ key_id: keyData.id, hwid }]);
-
-        if (insertDeviceError) throw insertDeviceError;
-
-        return res.json({
-          success: true,
-          message: "Login successful",
-          expires_at: keyData.expires_at,
-          token_name: tokenData.token_name,
-          display_text: tokenData.display_text,
-          duration_days: keyData.duration_days
-        });
-      }
-
-      // Device limit reached
-      await supabase.from('fraud_logs').insert([
-        { hwid, reason: `Vượt giới hạn thiết bị (Key: ${key_string}, Limit: ${keyData.max_devices})` }
-      ]);
-      return res.status(403).json({ success: false, message: "Đã đạt giới hạn thiết bị" });
+    const rawSessionToken = randomSessionToken();
+    const sessionExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    if (activation.expires_at) {
+      const licenseExpiry = new Date(activation.expires_at);
+      if (licenseExpiry < sessionExpiresAt) sessionExpiresAt.setTime(licenseExpiry.getTime());
     }
 
-    // Step 7: If expired
-    if (keyData.status === 'expired') {
-      return res.status(403).json({ success: false, message: "Key has expired" });
-    }
+    await supabase
+      .from('client_sessions')
+      .update({ status: 'revoked' })
+      .eq('key_id', activation.key_id)
+      .eq('device_id', activation.device_id)
+      .eq('status', 'active');
 
-    return res.status(500).json({ success: false, message: "Unknown key state error." });
+    const { data: session, error: sessionError } = await supabase
+      .from('client_sessions')
+      .insert([{
+        session_token_hash: hashSessionToken(rawSessionToken),
+        key_id: activation.key_id,
+        device_id: activation.device_id,
+        expires_at: sessionExpiresAt.toISOString()
+      }])
+      .select('id, expires_at')
+      .single();
+    if (sessionError) throw sessionError;
 
+    const policy = await getClientPolicy();
+    return res.json({
+      success: true,
+      authorized: policy.config.menu_enabled && !policy.config.maintenance_mode,
+      message: 'Activation successful',
+      token: rawSessionToken,
+      session_id: session.id,
+      session_expires_at: session.expires_at,
+      expires_at: activation.expires_at,
+      token_name: activation.token_name,
+      display_text: activation.display_text,
+      duration_days: activation.duration_days,
+      device_id: activation.device_id,
+      config: policy.config,
+      features: policy.features
+    });
   } catch (error) {
-    console.error("[CLIENT LOGIN] Internal error:", error.message || error);
-    return res.status(500).json({ success: false, message: "Database or internal server error." });
+    console.error('[CLIENT ACTIVATE] Internal error:', error.message || error);
+    return res.status(500).json({ success: false, message: 'Database or internal server error.' });
+  }
+}
+
+app.post('/api/client/login', handleClientActivation);
+app.post('/api/v1/client/activate', handleClientActivation);
+
+async function authenticateClientSession(req, res) {
+  const authHeader = req.headers.authorization || '';
+  const rawToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  if (!rawToken) {
+    res.status(401).json({ success: false, authorized: false, message: 'Missing client session token.' });
+    return null;
+  }
+
+  const { data: session, error } = await supabase
+    .from('client_sessions')
+    .select('*')
+    .eq('session_token_hash', hashSessionToken(rawToken))
+    .maybeSingle();
+  if (error) throw error;
+  if (!session || session.status !== 'active' || new Date(session.expires_at) <= new Date()) {
+    if (session?.status === 'active') {
+      await supabase.from('client_sessions').update({ status: 'expired' }).eq('id', session.id);
+    }
+    res.status(401).json({ success: false, authorized: false, message: 'Client session is invalid or expired.' });
+    return null;
+  }
+  return session;
+}
+
+app.post('/api/v1/client/heartbeat', async (req, res) => {
+  try {
+    const session = await authenticateClientSession(req, res);
+    if (!session) return;
+
+    const [{ data: device, error: deviceError }, { data: license, error: licenseError }] = await Promise.all([
+      supabase.from('devices').select('*').eq('id', session.device_id).single(),
+      supabase.from('keys_management').select('id, status, expires_at').eq('id', session.key_id).single()
+    ]);
+    if (deviceError) throw deviceError;
+    if (licenseError) throw licenseError;
+
+    const licenseExpired = license.status === 'expired' || (license.expires_at && new Date(license.expires_at) <= new Date());
+    if (device.status === 'banned' || license.status === 'banned' || licenseExpired) {
+      await supabase.from('client_sessions').update({ status: 'revoked' }).eq('id', session.id);
+      return res.status(403).json({
+        success: false,
+        authorized: false,
+        code: device.status === 'banned' ? 'device_banned' : license.status === 'banned' ? 'license_banned' : 'license_expired',
+        message: device.ban_reason || 'Access has been revoked.'
+      });
+    }
+
+    const now = new Date().toISOString();
+    const appVersion = sanitizeString(req.body.app_version, 32) || device.app_version;
+    await Promise.all([
+      supabase.from('client_sessions').update({ last_seen_at: now }).eq('id', session.id),
+      supabase.from('devices').update({ last_seen_at: now, app_version: appVersion, last_ip: getClientIp(req) }).eq('id', device.id)
+    ]);
+
+    const policy = await getClientPolicy();
+    return res.json({
+      success: true,
+      authorized: policy.config.menu_enabled && !policy.config.maintenance_mode,
+      server_time: now,
+      session_expires_at: session.expires_at,
+      license_expires_at: license.expires_at,
+      device_status: device.status,
+      config: policy.config,
+      features: policy.features
+    });
+  } catch (error) {
+    console.error('[CLIENT HEARTBEAT] Internal error:', error.message || error);
+    return res.status(500).json({ success: false, authorized: false, message: 'Heartbeat failed.' });
   }
 });
+
+app.post('/api/v1/client/logout', async (req, res) => {
+  try {
+    const session = await authenticateClientSession(req, res);
+    if (!session) return;
+    const { error } = await supabase.from('client_sessions').update({ status: 'revoked' }).eq('id', session.id);
+    if (error) throw error;
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[CLIENT LOGOUT] Internal error:', error.message || error);
+    return res.status(500).json({ success: false, message: 'Logout failed.' });
+  }
+});
+
 
 // ==========================================
 // STATIC FILE SERVING (Local development only)
