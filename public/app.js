@@ -1,5 +1,5 @@
 /**
- * ServerKey Cloud Business Control Center v4.2
+ * ServerKey Cloud Business Control Center v4.3
  * Real-state owner dashboard for licenses, devices and remote client policy.
  */
 
@@ -100,6 +100,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const updateUrlInput = document.getElementById('update-url-input');
     const heartbeatIntervalInput = document.getElementById('heartbeat-interval-input');
     const announcementInput = document.getElementById('announcement-input');
+    const notificationTargetInput = document.getElementById('notification-target-input');
+    const notificationTitleInput = document.getElementById('notification-title-input');
+    const notificationCharacterCount = document.getElementById('notification-character-count');
+    const notificationSendStatus = document.getElementById('notification-send-status');
     const configRevision = document.getElementById('config-revision');
     const saveControlBtn = document.getElementById('save-control-btn');
     const sendNotificationBtn = document.getElementById('send-notification-btn');
@@ -856,7 +860,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const config = state.controlConfig;
         const inputs = [menuEnabledInput, maintenanceModeInput, autoUpdateEnabledInput,
             minimumVersionInput, latestVersionInput, updateUrlInput,
-            heartbeatIntervalInput, announcementInput];
+            heartbeatIntervalInput];
 
         if (state.moduleErrors.control) {
             inputs.forEach(input => { input.disabled = true; });
@@ -884,7 +888,6 @@ document.addEventListener('DOMContentLoaded', () => {
         latestVersionInput.value = config.latest_version || '1.0.0';
         updateUrlInput.value = config.update_url || '';
         heartbeatIntervalInput.value = config.heartbeat_interval_seconds || 45;
-        announcementInput.value = config.announcement || '';
         configRevision.textContent = `Revision ${config.config_revision || 1}`;
         controlSaveStatus.textContent = `Cập nhật: ${formatDateTime(config.updated_at)}`;
     }
@@ -977,18 +980,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderDevices() {
         if (state.moduleErrors.devices) {
-            devicesTableBody.innerHTML = tableErrorRow(state.moduleErrors.devices, 8);
+            devicesTableBody.innerHTML = tableErrorRow(state.moduleErrors.devices, 9);
             return;
         }
+        renderNotificationTargets();
         const query = (deviceSearchInput.value || '').trim().toLowerCase();
         const devices = state.devices.filter(device => {
             if (!query) return true;
             const licenses = (device.licenses || []).map(item => item.key_string).join(' ');
-            return `${device.hwid} ${device.app_version || ''} ${licenses}`.toLowerCase().includes(query);
+            return `${device.device_name || ''} ${device.hwid} ${device.app_version || ''} ${licenses}`.toLowerCase().includes(query);
         });
 
         if (devices.length === 0) {
-            devicesTableBody.innerHTML = '<tr><td colspan="8" class="loading-state">Không tìm thấy thiết bị</td></tr>';
+            devicesTableBody.innerHTML = '<tr><td colspan="9" class="loading-state">Không tìm thấy thiết bị</td></tr>';
             return;
         }
 
@@ -999,6 +1003,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const banned = device.status === 'banned';
             return `
                 <tr>
+                    <td data-label="Tên thiết bị"><strong>${escapeHTML(device.device_name || 'Android device')}</strong></td>
                     <td data-label="Device ID"><span class="mono-value">${escapeHTML(device.hwid)}</span></td>
                     <td data-label="Version">${escapeHTML(device.app_version || '—')}</td>
                     <td data-label="Licenses">${licenses}</td>
@@ -1007,6 +1012,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td data-label="Trạng thái"><span class="status-pill ${banned ? 'status-banned' : 'status-active'}">${banned ? 'Banned' : 'Active'}</span></td>
                     <td data-label="Lý do" class="muted-value">${escapeHTML(device.ban_reason || '—')}</td>
                     <td data-label="Hành động" class="actions-cell">
+                        <button class="btn btn-outline btn-sm action-device-notify" data-device-id="${device.id}">
+                            <i class="fa-solid fa-bell"></i> Thông báo
+                        </button>
                         <button class="btn ${banned ? 'btn-warning-outline' : 'btn-danger-outline'} btn-sm action-device-status" data-device-id="${device.id}" data-device-status="${banned ? 'active' : 'banned'}">
                             <i class="fa-solid ${banned ? 'fa-lock-open' : 'fa-ban'}"></i> ${banned ? 'Mở khóa' : 'Khóa'}
                         </button>
@@ -1040,6 +1048,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             });
         });
+        document.querySelectorAll('.action-device-notify').forEach(button => {
+            button.addEventListener('click', () => {
+                notificationTargetInput.value = button.dataset.deviceId;
+                setActiveView('overview');
+                announcementInput.focus();
+                document.querySelector('.notification-command-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+        });
+    }
+
+    function renderNotificationTargets() {
+        const selected = notificationTargetInput.value;
+        notificationTargetInput.innerHTML = '<option value="">Tất cả client · All clients</option>' +
+            state.devices.map(device => {
+                const name = device.device_name || 'Android device';
+                const shortId = String(device.hwid || '').slice(0, 12);
+                return `<option value="${Number(device.id)}">${escapeHTML(name)} · ${escapeHTML(shortId)}…</option>`;
+            }).join('');
+        if ([...notificationTargetInput.options].some(option => option.value === selected)) {
+            notificationTargetInput.value = selected;
+        }
     }
 
     function renderSessions() {
@@ -1057,7 +1086,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
                 <tr>
                     <td data-label="Session" class="mono-value">#${session.id}</td>
-                    <td data-label="Device" class="mono-value">${escapeHTML(session.device?.hwid || '—')}</td>
+                    <td data-label="Device">
+                        <strong>${escapeHTML(session.device?.device_name || 'Android device')}</strong>
+                        <span class="mono-value muted-value device-id-secondary">${escapeHTML(session.device?.hwid || '—')}</span>
+                    </td>
                     <td data-label="License">${escapeHTML(session.license?.key_string || '—')}</td>
                     <td data-label="Version">${escapeHTML(session.device?.app_version || '—')}</td>
                     <td data-label="Last seen" class="muted-value">${formatDateTime(session.last_seen_at)}</td>
@@ -1097,31 +1129,23 @@ document.addEventListener('DOMContentLoaded', () => {
         button.addEventListener('click', () => setActiveView(button.dataset.targetView));
     });
 
-    [menuEnabledInput, maintenanceModeInput, autoUpdateEnabledInput, minimumVersionInput,
-        latestVersionInput, updateUrlInput, heartbeatIntervalInput, announcementInput]
+    [maintenanceModeInput, autoUpdateEnabledInput, minimumVersionInput,
+        latestVersionInput, updateUrlInput, heartbeatIntervalInput]
         .forEach(input => input.addEventListener('input', () => {
             controlSaveStatus.textContent = 'Có thay đổi chưa lưu';
         }));
 
-    async function persistControlPolicy(asNotification) {
+    async function persistControlPolicy() {
+        const requestedMenuEnabled = menuEnabledInput.checked;
         const heartbeat = Number.parseInt(heartbeatIntervalInput.value, 10);
         if (!Number.isInteger(heartbeat) || heartbeat < 15 || heartbeat > 3600) {
             showToast('Heartbeat phải nằm trong khoảng 15–3600 giây.', 'error');
             heartbeatIntervalInput.focus();
-            return;
-        }
-        if (asNotification && !announcementInput.value.trim()) {
-            showToast('Hãy nhập nội dung thông báo trước khi gửi.', 'error');
-            announcementInput.focus();
-            return;
+            return false;
         }
 
         saveControlBtn.disabled = true;
-        sendNotificationBtn.disabled = true;
         saveControlBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
-        if (asNotification) {
-            sendNotificationBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...';
-        }
         const res = await apiRequest('/api/admin/control-config', 'PATCH', {
             menu_enabled: menuEnabledInput.checked,
             maintenance_mode: maintenanceModeInput.checked,
@@ -1129,29 +1153,72 @@ document.addEventListener('DOMContentLoaded', () => {
             minimum_version: minimumVersionInput.value.trim(),
             latest_version: latestVersionInput.value.trim(),
             update_url: updateUrlInput.value.trim(),
-            heartbeat_interval_seconds: heartbeat,
-            announcement: announcementInput.value.trim()
+            heartbeat_interval_seconds: heartbeat
         });
         saveControlBtn.disabled = false;
-        sendNotificationBtn.disabled = false;
         saveControlBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i><span>Lưu Remote Policy</span>';
-        sendNotificationBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i><span>Gửi thông báo</span>';
 
         if (res.success) {
+            if (Boolean(res.data.config?.menu_enabled) !== requestedMenuEnabled) {
+                showToast('Server không xác nhận đúng trạng thái All Clients. Đang tải lại policy.', 'error');
+                await loadData();
+                return false;
+            }
             state.controlConfig = res.data.config;
             renderControlPlane();
-            showToast(asNotification
-                ? 'Thông báo đã được gửi tới các client đang online.'
-                : 'Remote policy đã được cập nhật.', 'success');
-        } else {
-            showToast(res.message || (asNotification
-                ? 'Không thể gửi thông báo.'
-                : 'Không thể lưu remote policy.'), 'error');
+            showToast('Remote policy đã được cập nhật và xác nhận bởi server.', 'success');
+            return true;
         }
+        showToast(res.message || 'Không thể lưu remote policy.', 'error');
+        return false;
     }
 
-    saveControlBtn.addEventListener('click', () => persistControlPolicy(false));
-    sendNotificationBtn.addEventListener('click', () => persistControlPolicy(true));
+    saveControlBtn.addEventListener('click', persistControlPolicy);
+
+    menuEnabledInput.addEventListener('change', async () => {
+        const requestedState = menuEnabledInput.checked;
+        controlSaveStatus.textContent = requestedState
+            ? 'Đang mở khóa toàn bộ client…'
+            : 'Đang khóa toàn bộ client…';
+        const saved = await persistControlPolicy();
+        if (!saved) menuEnabledInput.checked = !requestedState;
+    });
+
+    announcementInput.addEventListener('input', () => {
+        notificationCharacterCount.textContent = `${announcementInput.value.length} / 700`;
+    });
+
+    sendNotificationBtn.addEventListener('click', async () => {
+        const message = announcementInput.value.trim();
+        if (!message) {
+            showToast('Hãy nhập nội dung thông báo trước khi gửi.', 'error');
+            announcementInput.focus();
+            return;
+        }
+        const selectedDevice = notificationTargetInput.value;
+        sendNotificationBtn.disabled = true;
+        notificationSendStatus.textContent = 'Đang chuyển thông báo tới ServerKey…';
+        sendNotificationBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Đang gửi…</span>';
+        const res = await apiRequest('/api/admin/notifications', 'POST', {
+            device_id: selectedDevice ? Number(selectedDevice) : null,
+            title: notificationTitleInput.value.trim() || 'ServerKey',
+            message
+        });
+        sendNotificationBtn.disabled = false;
+        sendNotificationBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i><span>Gửi thông báo · Send</span>';
+        if (res.success) {
+            const targetLabel = selectedDevice
+                ? notificationTargetInput.options[notificationTargetInput.selectedIndex].textContent
+                : 'tất cả client';
+            notificationSendStatus.textContent = `Đã xếp hàng cho ${targetLabel}`;
+            announcementInput.value = '';
+            notificationCharacterCount.textContent = '0 / 700';
+            showToast(`Thông báo đã gửi tới ${targetLabel}; client nhận ở heartbeat kế tiếp.`, 'success');
+            return;
+        }
+        notificationSendStatus.textContent = 'Gửi thất bại · nội dung vẫn được giữ lại';
+        showToast(res.message || 'Không thể gửi thông báo.', 'error');
+    });
 
     featureFlagForm.addEventListener('submit', async (event) => {
         event.preventDefault();

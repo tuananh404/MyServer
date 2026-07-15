@@ -158,6 +158,58 @@ function sanitizeString(value, maxLength, fallback = '') {
   return value.trim().slice(0, maxLength);
 }
 
+function parseRequiredBoolean(value) {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function buildNotificationEnvelope(title, message) {
+  return {
+    type: 'serverkey_notification_v1',
+    id: crypto.randomUUID(),
+    title: sanitizeString(title, 100, 'ServerKey'),
+    message: sanitizeString(message, 700),
+    created_at: new Date().toISOString()
+  };
+}
+
+function parseNotificationEnvelope(value) {
+  if (!value) return null;
+  let parsed = value;
+  if (typeof value === 'string') {
+    try { parsed = JSON.parse(value); } catch { return null; }
+  }
+  if (!parsed || parsed.type !== 'serverkey_notification_v1') return null;
+  const id = sanitizeString(parsed.id, 64);
+  const title = sanitizeString(parsed.title, 100, 'ServerKey');
+  const message = sanitizeString(parsed.message, 700);
+  const createdAt = sanitizeString(parsed.created_at, 64);
+  if (!id || !message || !createdAt) return null;
+  return { id, title, message, created_at: createdAt };
+}
+
+function selectDeviceNotification(config, device, acknowledgedId) {
+  const globalNotification = parseNotificationEnvelope(config?.announcement);
+  const targetedNotification = parseNotificationEnvelope(device?.metadata?.notification);
+  const candidates = [globalNotification, targetedNotification].filter(Boolean)
+    .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+  const latest = candidates[0] || null;
+  return latest && latest.id !== acknowledgedId ? latest : null;
+}
+
+async function updateDeviceMetadata(device, deviceName) {
+  const normalizedName = sanitizeString(deviceName, 120);
+  if (!device?.id || !normalizedName) return device;
+  const metadata = { ...(device.metadata || {}), device_name: normalizedName };
+  const { data, error } = await supabase
+    .from('devices')
+    .update({ metadata })
+    .eq('id', device.id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 function parseVersionParts(value) {
   const match = String(value || '').trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
   return match ? match.slice(1, 4).map(Number) : null;
@@ -174,39 +226,38 @@ function compareVersions(left, right) {
 }
 
 function getClientAuthorization(config, appVersion) {
-  const announcement = sanitizeString(config?.announcement, 1000);
   if (config?.maintenance_mode) {
     return {
       authorized: false,
       code: 'maintenance',
-      message: announcement || 'Hệ thống đang bảo trì.'
+      message: 'Hệ thống đang bảo trì · System maintenance is active.'
     };
   }
   if (!config?.menu_enabled) {
     return {
       authorized: false,
       code: 'all_clients_disabled',
-      message: announcement || 'Quyền truy cập của toàn bộ client đang bị khóa.'
+      message: 'Toàn bộ client đã bị khóa · All client access is disabled.'
     };
   }
   if (config?.minimum_version && !parseVersionParts(appVersion)) {
     return {
       authorized: false,
       code: 'invalid_version',
-      message: announcement || 'Client không cung cấp phiên bản semantic hợp lệ.'
+      message: 'Phiên bản client không hợp lệ · Invalid client version.'
     };
   }
   if (config?.minimum_version && compareVersions(appVersion, config.minimum_version) < 0) {
     return {
       authorized: false,
       code: 'upgrade_required',
-      message: announcement || `Cần cập nhật client lên phiên bản ${config.minimum_version} hoặc mới hơn.`
+      message: `Cần cập nhật lên ${config.minimum_version}+ · Update to client ${config.minimum_version} or newer.`
     };
   }
   return {
     authorized: true,
     code: 'ok',
-    message: announcement || 'Client đã được ServerKey cấp quyền.'
+    message: 'ServerKey đã cấp quyền · Client authorized by ServerKey.'
   };
 }
 
@@ -277,7 +328,7 @@ app.get('/api/health', async (req, res) => {
       status: 'degraded',
       database_configured: false,
       schema_ready: false,
-      version: '4.2.0',
+      version: '4.3.0',
       message: 'Database environment variables are missing.',
       timestamp: new Date().toISOString()
     });
@@ -293,7 +344,7 @@ app.get('/api/health', async (req, res) => {
     status: schemaReady ? 'ok' : 'migration_required',
     database_configured: true,
     schema_ready: schemaReady,
-    version: '4.2.0',
+    version: '4.3.0',
     message: schemaReady ? 'ServerKey control plane is operational.' : 'Run supabase.sql to install the v4 database schema.',
     timestamp: new Date().toISOString()
   });
@@ -824,6 +875,15 @@ app.patch('/api/admin/control-config', verifyAdmin, async (req, res) => {
   const heartbeat = Number.parseInt(req.body.heartbeat_interval_seconds, 10);
   const minimumVersion = sanitizeString(req.body.minimum_version, 32, '1.0.0');
   const latestVersion = sanitizeString(req.body.latest_version, 32, '1.0.0');
+  const menuEnabled = parseRequiredBoolean(req.body.menu_enabled);
+  const maintenanceMode = parseRequiredBoolean(req.body.maintenance_mode);
+  const autoUpdateEnabled = parseRequiredBoolean(req.body.auto_update_enabled);
+  if (menuEnabled === null || maintenanceMode === null || autoUpdateEnabled === null) {
+    return res.status(400).json({
+      success: false,
+      message: 'menu_enabled, maintenance_mode, and auto_update_enabled must be booleans.'
+    });
+  }
   if (!parseVersionParts(minimumVersion) || !parseVersionParts(latestVersion)) {
     return res.status(400).json({
       success: false,
@@ -837,14 +897,13 @@ app.patch('/api/admin/control-config', verifyAdmin, async (req, res) => {
     });
   }
   const update = {
-    menu_enabled: Boolean(req.body.menu_enabled),
-    maintenance_mode: Boolean(req.body.maintenance_mode),
-    auto_update_enabled: Boolean(req.body.auto_update_enabled),
+    menu_enabled: menuEnabled,
+    maintenance_mode: maintenanceMode,
+    auto_update_enabled: autoUpdateEnabled,
     minimum_version: minimumVersion,
     latest_version: latestVersion,
     update_url: sanitizeString(req.body.update_url, 500) || null,
     heartbeat_interval_seconds: Number.isInteger(heartbeat) && heartbeat >= 15 && heartbeat <= 3600 ? heartbeat : 45,
-    announcement: sanitizeString(req.body.announcement, 1000) || null,
     updated_at: new Date().toISOString()
   };
 
@@ -873,6 +932,63 @@ app.patch('/api/admin/control-config', verifyAdmin, async (req, res) => {
   } catch (error) {
     console.error('[CONTROL CONFIG] Update failed:', error);
     return res.status(500).json({ success: false, message: 'Could not update client control configuration.' });
+  }
+});
+
+app.post('/api/admin/notifications', verifyAdmin, async (req, res) => {
+  const deviceId = req.body.device_id === null || req.body.device_id === undefined || req.body.device_id === ''
+    ? null
+    : Number.parseInt(req.body.device_id, 10);
+  const title = sanitizeString(req.body.title, 100, 'ServerKey');
+  const message = sanitizeString(req.body.message, 700);
+  if (!message) {
+    return res.status(400).json({ success: false, message: 'Notification message is required.' });
+  }
+  if (deviceId !== null && (!Number.isInteger(deviceId) || deviceId <= 0)) {
+    return res.status(400).json({ success: false, message: 'device_id must be a valid device or null for all clients.' });
+  }
+
+  const notification = buildNotificationEnvelope(title, message);
+  try {
+    if (deviceId === null) {
+      const { data: current, error: currentError } = await supabase
+        .from('client_config')
+        .select('config_revision')
+        .eq('id', 1)
+        .single();
+      if (currentError) throw currentError;
+      const { error } = await supabase
+        .from('client_config')
+        .update({
+          announcement: JSON.stringify(notification),
+          config_revision: Number(current.config_revision || 0) + 1,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', 1);
+      if (error) throw error;
+    } else {
+      const { data: device, error: deviceError } = await supabase
+        .from('devices')
+        .select('id, metadata')
+        .eq('id', deviceId)
+        .maybeSingle();
+      if (deviceError) throw deviceError;
+      if (!device) return res.status(404).json({ success: false, message: 'Device not found.' });
+      const { error } = await supabase
+        .from('devices')
+        .update({ metadata: { ...(device.metadata || {}), notification } })
+        .eq('id', deviceId);
+      if (error) throw error;
+    }
+    return res.status(201).json({
+      success: true,
+      notification: parseNotificationEnvelope(notification),
+      target: deviceId === null ? 'all_clients' : 'device',
+      device_id: deviceId
+    });
+  } catch (error) {
+    console.error('[NOTIFICATIONS] Send failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not send the notification.' });
   }
 });
 
@@ -965,6 +1081,7 @@ app.get('/api/admin/devices', verifyAdmin, async (req, res) => {
 
     const devices = (deviceResult.data || []).map(device => ({
       ...device,
+      device_name: sanitizeString(device.metadata?.device_name, 120) || null,
       licenses: bindingMap.get(device.hwid) || [],
       active_sessions: activeSessionCounts.get(device.id) || 0
     }));
@@ -1030,14 +1147,17 @@ app.get('/api/admin/sessions', verifyAdmin, async (req, res) => {
 
     const [sessionResult, deviceResult, keyResult] = await Promise.all([
       supabase.from('client_sessions').select('id, key_id, device_id, status, created_at, last_seen_at, expires_at').order('last_seen_at', { ascending: false }).limit(500),
-      supabase.from('devices').select('id, hwid, status, app_version'),
+      supabase.from('devices').select('id, hwid, status, app_version, metadata'),
       supabase.from('keys_management').select('id, key_string, status')
     ]);
     for (const result of [sessionResult, deviceResult, keyResult]) {
       if (result.error) throw result.error;
     }
 
-    const deviceMap = new Map((deviceResult.data || []).map(device => [device.id, device]));
+    const deviceMap = new Map((deviceResult.data || []).map(device => [device.id, {
+      ...device,
+      device_name: sanitizeString(device.metadata?.device_name, 120) || null
+    }]));
     const keyMap = new Map((keyResult.data || []).map(key => [key.id, key]));
     const sessions = (sessionResult.data || []).map(session => ({
       ...session,
@@ -1123,6 +1243,8 @@ async function handleClientActivation(req, res) {
   const keyString = sanitizeString(req.body.key_string, 256);
   const hwid = sanitizeString(req.body.hwid, 256);
   const appVersion = sanitizeString(req.body.app_version, 32) || null;
+  const deviceName = sanitizeString(req.body.device_name, 120);
+  const acknowledgedNotificationId = sanitizeString(req.body.last_notification_id, 64);
 
   if (!tokenString || !keyString || !hwid) {
     return res.status(400).json({ success: false, message: 'token_string, key_string, and hwid are required.' });
@@ -1158,6 +1280,14 @@ async function handleClientActivation(req, res) {
       });
     }
 
+    const { data: registeredDevice, error: registeredDeviceError } = await supabase
+      .from('devices')
+      .select('*')
+      .eq('id', activation.device_id)
+      .single();
+    if (registeredDeviceError) throw registeredDeviceError;
+    const device = await updateDeviceMetadata(registeredDevice, deviceName);
+
     const rawSessionToken = randomSessionToken();
     const sessionExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     if (activation.expires_at) {
@@ -1186,6 +1316,8 @@ async function handleClientActivation(req, res) {
 
     const policy = await getClientPolicy();
     const authorization = getClientAuthorization(policy.config, appVersion);
+    const notification = selectDeviceNotification(
+      policy.config, device, acknowledgedNotificationId);
     return res.json({
       success: true,
       authorized: authorization.authorized,
@@ -1200,6 +1332,8 @@ async function handleClientActivation(req, res) {
       display_text: activation.display_text,
       duration_days: activation.duration_days,
       device_id: activation.device_id,
+      device_name: device?.metadata?.device_name || deviceName || null,
+      notification,
       config: policy.config,
       features: policy.features
     });
@@ -1259,7 +1393,7 @@ app.post('/api/v1/client/heartbeat', async (req, res) => {
     const session = await authenticateClientSession(req, res);
     if (!session) return;
 
-    const [{ data: device, error: deviceError }, { data: license, error: licenseError }] = await Promise.all([
+    const [{ data: loadedDevice, error: deviceError }, { data: license, error: licenseError }] = await Promise.all([
       supabase.from('devices').select('*').eq('id', session.device_id).single(),
       supabase.from('keys_management').select('id, status, expires_at').eq('id', session.key_id).single()
     ]);
@@ -1267,25 +1401,37 @@ app.post('/api/v1/client/heartbeat', async (req, res) => {
     if (licenseError) throw licenseError;
 
     const licenseExpired = license.status === 'expired' || (license.expires_at && new Date(license.expires_at) <= new Date());
-    if (device.status === 'banned' || license.status === 'banned' || licenseExpired) {
+    if (loadedDevice.status === 'banned' || license.status === 'banned' || licenseExpired) {
       await supabase.from('client_sessions').update({ status: 'revoked' }).eq('id', session.id);
       return res.status(403).json({
         success: false,
         authorized: false,
-        code: device.status === 'banned' ? 'device_banned' : license.status === 'banned' ? 'license_banned' : 'license_expired',
-        message: device.ban_reason || 'Access has been revoked.'
+        code: loadedDevice.status === 'banned' ? 'device_banned' : license.status === 'banned' ? 'license_banned' : 'license_expired',
+        message: loadedDevice.ban_reason || 'Access has been revoked.'
       });
     }
 
     const now = new Date().toISOString();
-    const appVersion = sanitizeString(req.body.app_version, 32) || device.app_version;
+    const appVersion = sanitizeString(req.body.app_version, 32) || loadedDevice.app_version;
+    const deviceName = sanitizeString(req.body.device_name, 120);
+    const acknowledgedNotificationId = sanitizeString(req.body.last_notification_id, 64);
+    let device = loadedDevice;
+    if (deviceName && deviceName !== sanitizeString(loadedDevice.metadata?.device_name, 120)) {
+      device = await updateDeviceMetadata(loadedDevice, deviceName);
+    }
     await Promise.all([
       supabase.from('client_sessions').update({ last_seen_at: now }).eq('id', session.id),
-      supabase.from('devices').update({ last_seen_at: now, app_version: appVersion, last_ip: getClientIp(req) }).eq('id', device.id)
+      supabase.from('devices').update({
+        last_seen_at: now,
+        app_version: appVersion,
+        last_ip: getClientIp(req)
+      }).eq('id', device.id)
     ]);
 
     const policy = await getClientPolicy();
     const authorization = getClientAuthorization(policy.config, appVersion);
+    const notification = selectDeviceNotification(
+      policy.config, device, acknowledgedNotificationId);
     return res.json({
       success: true,
       authorized: authorization.authorized,
@@ -1295,6 +1441,8 @@ app.post('/api/v1/client/heartbeat', async (req, res) => {
       session_expires_at: session.expires_at,
       license_expires_at: license.expires_at,
       device_status: device.status,
+      device_name: device.metadata?.device_name || null,
+      notification,
       config: policy.config,
       features: policy.features
     });

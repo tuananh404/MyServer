@@ -25,16 +25,16 @@ test('all clients switch and maintenance fail closed with stable codes', () => {
   assert.deepEqual(authorize(config({ menu_enabled: false }), '1.0.0'), {
     authorized: false,
     code: 'all_clients_disabled',
-    message: 'Quyền truy cập của toàn bộ client đang bị khóa.'
+    message: 'Toàn bộ client đã bị khóa · All client access is disabled.'
   });
   assert.equal(authorize(config({ maintenance_mode: true }), '1.0.0').code, 'maintenance');
 });
 
-test('minimum version blocks outdated clients and preserves announcement', () => {
+test('minimum version blocks outdated clients without leaking notification content', () => {
   const result = authorize(config({ minimum_version: '1.2.0', announcement: 'Update now.' }), '1.1.9');
   assert.equal(result.authorized, false);
   assert.equal(result.code, 'upgrade_required');
-  assert.equal(result.message, 'Update now.');
+  assert.equal(result.message, 'Cần cập nhật lên 1.2.0+ · Update to client 1.2.0 or newer.');
 });
 
 test('missing or malformed client versions fail closed', () => {

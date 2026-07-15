@@ -17,7 +17,7 @@ can manage Java overlays, native IMGUI, or another UI framework.
 | Maintenance Mode | Locks runtime while heartbeat stays online |
 | Auto Update Allowed | Enables updater logic only |
 | Minimum Version | Locks builds below the configured semantic version |
-| Announcement | Displays the real operator message in the client |
+| Notification | Delivers a global or device-targeted message independently from lock/error state |
 | Feature enabled | Allows one named feature group |
 | Feature locked | Shows the group as read-only |
 
@@ -34,6 +34,7 @@ boot locked
   -> apply config + feature policy
   -> start native hooks only when authorized
   -> POST /api/v1/client/heartbeat at the server interval
+  -> update device name + receive the next targeted/global notification
   -> atomically revoke effects when policy becomes unauthorized
 ```
 
@@ -58,6 +59,10 @@ still be consumed by a hook.
 - Deterministic per-installation/device identifier scoped by project and app.
 - Bounded HTTP response body, connection/read timeouts, heartbeat jitter, and a
   short offline grace followed by fail-closed behavior.
+- Report the user-visible Android device name on activation and heartbeat while
+  keeping the stable hashed HWID as the authorization identity.
+- Acknowledge notification IDs and persist the latest full notification in the
+  same encrypted store so a toast is not replayed after every heartbeat.
 - Automatic reactivation only for a genuinely expired session. Explicit
   revocation and bans must stay locked.
 
@@ -77,5 +82,5 @@ remain a separate native module.
 
 Verify activation, encrypted session restore, 24-hour session renewal, explicit
 session revocation, global disable/enable, maintenance, all feature states,
-announcement text, minimum version, device/license ban, offline grace expiry,
+global and per-device notifications, minimum version, device/license ban, offline grace expiry,
 and both update-switch states on a real Android device.

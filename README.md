@@ -89,7 +89,9 @@ Request:
   "token_string": "TKN_PRODUCT_TOKEN",
   "key_string": "key-30day-EXAMPLE",
   "hwid": "HWID_DEVICE_INSTALLATION_ID",
-  "app_version": "1.0.0"
+  "device_name": "Samsung Galaxy S24 Ultra",
+  "app_version": "1.0.0",
+  "last_notification_id": ""
 }
 ```
 
@@ -100,13 +102,20 @@ Successful response:
   "success": true,
   "authorized": true,
   "authorization_code": "ok",
-  "authorization_message": "Client đã được ServerKey cấp quyền.",
+  "authorization_message": "ServerKey đã cấp quyền · Client authorized by ServerKey.",
   "token": "SKS_SESSION_TOKEN",
   "session_id": 12,
   "session_expires_at": "2026-07-16T12:00:00.000Z",
   "expires_at": "2026-08-14T12:00:00.000Z",
   "duration_days": 30,
   "device_id": 8,
+  "device_name": "Samsung Galaxy S24 Ultra",
+  "notification": {
+    "id": "b93b0d55-4d57-48a3-9fa5-9e493f12004b",
+    "title": "ServerKey",
+    "message": "Nội dung đầy đủ được đọc trong tab Thông báo.",
+    "created_at": "2026-07-15T12:00:00.000Z"
+  },
   "config": {
     "menu_enabled": true,
     "maintenance_mode": false,
@@ -128,8 +137,9 @@ Successful response:
 
 `authorized` becomes false when All Clients is disabled, maintenance mode is
 active, or the client version is missing, malformed, or below
-`minimum_version`. The client must display `authorization_message`/the server
-announcement and disable its runtime effects in that state.
+`minimum_version`. The client must display `authorization_message` and disable
+its runtime effects in that state. Notifications are a separate payload and
+must never be used as an authorization or error message.
 `auto_update_enabled` controls only the updater and is not a global access
 switch.
 
@@ -142,13 +152,22 @@ POST /api/v1/client/heartbeat
 Authorization: Bearer SKS_SESSION_TOKEN
 Content-Type: application/json
 
-{"app_version":"1.0.0"}
+{
+  "app_version":"1.0.0",
+  "device_name":"Samsung Galaxy S24 Ultra",
+  "last_notification_id":"b93b0d55-4d57-48a3-9fa5-9e493f12004b"
+}
 ```
 
-The heartbeat returns the latest policy and feature flags. The client should use
-`heartbeat_interval_seconds`, with a minimum of 15 seconds. A banned device,
-banned/expired license, revoked session, maintenance state, or disabled menu is
-reported on the next heartbeat.
+Heartbeat is the authenticated background check-in from a running client. It
+updates the device's last-seen time/name and returns the latest policy, feature
+flags, bans, and the newest global or per-device notification. The client uses
+`heartbeat_interval_seconds` with a minimum of 15 seconds; the Android reference
+adds ±10% jitter to avoid every device contacting the server simultaneously.
+A banned device, banned/expired license, revoked session, maintenance state, or
+disabled menu is therefore enforced on the next heartbeat. Heartbeat remains
+active while the menu is globally disabled so the same client can be unlocked
+without restarting.
 
 For the reusable Android/IMGUI architecture, security boundaries, control
 semantics, and acceptance checklist, see
@@ -184,6 +203,7 @@ Control-plane endpoints:
 | --- | --- | --- |
 | GET | `/api/admin/control-config` | Load remote policy and feature flags |
 | PATCH | `/api/admin/control-config` | Update menu, maintenance, version, and update policy |
+| POST | `/api/admin/notifications` | Send a global or per-device notification |
 | POST | `/api/admin/feature-flag` | Create or update a feature flag |
 | DELETE | `/api/admin/feature-flag` | Delete a feature flag |
 | GET | `/api/admin/devices` | List devices, linked licenses, and active sessions |
@@ -199,7 +219,7 @@ Existing token, key, stats, and fraud-log admin routes remain compatible.
 2. Push this repository to GitHub.
 3. Import the repository into Vercel.
 4. Add the environment variables listed above.
-5. Deploy and verify `/api/health` reports `status: ok` and version `4.2.0`.
+5. Deploy and verify `/api/health` reports `status: ok` and version `4.3.0`.
 
 The GitHub/Vercel integration will redeploy automatically after later pushes to
 the configured production branch.

@@ -230,7 +230,7 @@
                         <label class="control-toggle-card" for="menu-enabled-input">
                             <span class="control-toggle-copy">
                                 <strong>All Clients Enabled</strong>
-                                <small>Master switch cấp hoặc khóa quyền của mọi client</small>
+                                <small>Tự lưu ngay · Khóa menu/toast, heartbeat vẫn duy trì</small>
                             </span>
                             <input type="checkbox" id="menu-enabled-input">
                             <span class="switch-track"></span>
@@ -270,20 +270,53 @@
                             <label for="update-url-input">Update URL (HTTPS)</label>
                             <input type="url" id="update-url-input" placeholder="https://example.com/releases/latest">
                         </div>
-                        <div class="form-group grid-col-span-all">
-                            <label for="announcement-input">Client Announcement</label>
-                            <textarea id="announcement-input" rows="3" maxlength="1000" placeholder="Thông báo bảo trì, changelog hoặc nội dung dành cho người dùng..."></textarea>
-                        </div>
                     </form>
                     <div class="control-actions">
                         <span id="control-save-status" class="save-status">Chưa có thay đổi</span>
-                        <button id="send-notification-btn" class="btn btn-outline">
-                            <i class="fa-solid fa-paper-plane"></i>
-                            <span>Gửi thông báo</span>
-                        </button>
                         <button id="save-control-btn" class="btn btn-primary btn-glow">
                             <i class="fa-solid fa-floppy-disk"></i>
                             <span>Lưu Remote Policy</span>
+                        </button>
+                    </div>
+                </section>
+
+                <section class="glass-card grid-col-full card-fade-up notification-command-card" data-view-section="overview">
+                    <div class="notification-command-heading">
+                        <div class="notification-command-icon"><i class="fa-solid fa-bell"></i></div>
+                        <div>
+                            <span class="page-eyebrow">CLIENT MESSAGING</span>
+                            <h2>Notification Command Center</h2>
+                            <p>Gửi toàn hệ thống hoặc đúng một Device ID. Client nhận ở heartbeat kế tiếp.</p>
+                        </div>
+                        <span class="delivery-chip"><i class="fa-solid fa-shield-check"></i> Server verified</span>
+                    </div>
+                    <div class="notification-form-grid">
+                        <div class="form-group">
+                            <label for="notification-target-input">Người nhận · Recipient</label>
+                            <select id="notification-target-input">
+                                <option value="">Tất cả client · All clients</option>
+                            </select>
+                            <small>Chọn một thiết bị để gửi riêng, hoặc để mặc định gửi toàn bộ.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="notification-title-input">Tiêu đề trên thanh thông báo · Toast title</label>
+                            <input id="notification-title-input" maxlength="100" value="ServerKey" placeholder="ServerKey">
+                            <small>Toast chỉ hiện tiêu đề; nội dung đầy đủ nằm trong tab Thông báo.</small>
+                        </div>
+                        <div class="form-group notification-message-field">
+                            <label for="announcement-input">Nội dung đầy đủ · Full message</label>
+                            <textarea id="announcement-input" rows="4" maxlength="700" placeholder="Nhập thông báo dành cho người dùng..."></textarea>
+                            <div class="notification-field-meta">
+                                <span><i class="fa-solid fa-clock"></i> Phát ở heartbeat tiếp theo</span>
+                                <span id="notification-character-count">0 / 700</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="control-actions notification-actions">
+                        <span id="notification-send-status" class="save-status">Sẵn sàng gửi</span>
+                        <button id="send-notification-btn" class="btn btn-primary btn-glow">
+                            <i class="fa-solid fa-paper-plane"></i>
+                            <span>Gửi thông báo · Send</span>
                         </button>
                     </div>
                 </section>
@@ -352,6 +385,7 @@
                         <table class="responsive-cards device-table">
                             <thead>
                                 <tr>
+                                    <th>Tên thiết bị</th>
                                     <th>Device ID</th>
                                     <th>Version</th>
                                     <th>Licenses</th>
@@ -363,7 +397,7 @@
                                 </tr>
                             </thead>
                             <tbody id="devices-table-body">
-                                <tr><td colspan="8" class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải thiết bị...</td></tr>
+                                <tr><td colspan="9" class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải thiết bị...</td></tr>
                             </tbody>
                         </table>
                     </div>

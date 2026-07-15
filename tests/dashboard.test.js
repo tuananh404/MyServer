@@ -19,7 +19,7 @@ function jsonResponse(status, data) {
 function successfulResponses() {
   return {
     '/api/health': jsonResponse(200, {
-      status: 'ok', schema_ready: true, database_configured: true, version: '4.2.0',
+      status: 'ok', schema_ready: true, database_configured: true, version: '4.3.0',
       message: 'ServerKey control plane is operational.'
     }),
     '/api/admin/get-keys': jsonResponse(200, {
@@ -123,11 +123,47 @@ test('online dashboard renders real data and switches workspaces', async () => {
   dom.window.close();
 });
 
+test('master switch persists immediately and targeted notification uses the selected device', async () => {
+  const responses = successfulResponses();
+  const dom = await bootDashboard(responses);
+  const { document } = dom.window;
+
+  responses['/api/admin/control-config'] = jsonResponse(200, {
+    success: true,
+    config: {
+      id: 1, menu_enabled: false, maintenance_mode: false, auto_update_enabled: false,
+      minimum_version: '1.0.0', latest_version: '1.1.0', update_url: null,
+      heartbeat_interval_seconds: 45, announcement: null, config_revision: 8,
+      updated_at: '2026-07-15T10:01:00.000Z'
+    },
+    features: {}
+  });
+  document.querySelector('#menu-enabled-input').click();
+  await new Promise(resolve => dom.window.setTimeout(resolve, 80));
+  assert.equal(document.querySelector('#menu-enabled-input').checked, false);
+  assert.equal(document.querySelector('#config-revision').textContent, 'Revision 8');
+
+  responses['/api/admin/notifications'] = jsonResponse(201, {
+    success: true,
+    target: 'device',
+    device_id: 9,
+    notification: { id: 'notification-1', title: 'VIP', message: 'Hello', created_at: '2026-07-15T10:02:00.000Z' }
+  });
+  document.querySelector('#notification-target-input').value = '9';
+  document.querySelector('#notification-title-input').value = 'VIP';
+  document.querySelector('#announcement-input').value = 'Hello';
+  document.querySelector('#send-notification-btn').click();
+  await new Promise(resolve => dom.window.setTimeout(resolve, 80));
+  assert.match(document.querySelector('#notification-send-status').textContent, /Android device/);
+  assert.equal(document.querySelector('#announcement-input').value, '');
+  dom.window.close();
+});
+
 test('migration and module failures are shown as degraded, never connected', async () => {
   const responses = successfulResponses();
   responses['/api/health'] = jsonResponse(503, {
     status: 'migration_required', schema_ready: false, database_configured: true,
-    version: '4.2.0', message: 'Run supabase.sql to install the v4 database schema.'
+    version: '4.3.0', message: 'Run supabase.sql to install the v4 database schema.'
   });
   for (const endpoint of ['/api/admin/stats', '/api/admin/control-config', '/api/admin/devices', '/api/admin/sessions']) {
     responses[endpoint] = jsonResponse(500, { success: false, message: `Database module unavailable: ${endpoint}` });

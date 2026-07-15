@@ -1,5 +1,5 @@
 /* ==========================================================================
-   DESIGN SYSTEM & VARIABLES — ServerKey Premium Console v4.2
+   DESIGN SYSTEM & VARIABLES — ServerKey Premium Console v4.3
    ========================================================================== */
 :root {
     --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -1573,6 +1573,107 @@ tbody tr:last-child td { border-bottom: none; }
     font-size: 11px;
 }
 
+.notification-command-card {
+    position: relative;
+    overflow: hidden;
+    border-color: rgba(129, 140, 248, 0.2);
+    background:
+        radial-gradient(circle at 92% 0%, rgba(34, 211, 238, 0.1), transparent 28%),
+        linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(8, 10, 22, 0.45)),
+        var(--color-card);
+}
+
+.notification-command-card::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--color-secondary), var(--color-primary-solid));
+    box-shadow: 0 0 24px var(--color-secondary-glow);
+}
+
+.notification-command-heading {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 22px;
+}
+
+.notification-command-heading > div:nth-child(2) { flex: 1; }
+.notification-command-heading h2 { margin: 2px 0 3px; font-size: 18px; }
+.notification-command-heading p { color: var(--color-text-muted); font-size: 12px; }
+
+.notification-command-icon {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    flex: 0 0 48px;
+    place-items: center;
+    border: 1px solid rgba(34, 211, 238, 0.22);
+    border-radius: 15px;
+    color: var(--color-secondary);
+    background: rgba(34, 211, 238, 0.08);
+    box-shadow: 0 8px 30px rgba(34, 211, 238, 0.08);
+}
+
+.delivery-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 11px;
+    border: 1px solid rgba(52, 211, 153, 0.2);
+    border-radius: 999px;
+    color: var(--color-success);
+    background: rgba(52, 211, 153, 0.06);
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.notification-form-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr);
+    gap: 14px;
+}
+
+.notification-form-grid select,
+.notification-form-grid input,
+.notification-form-grid textarea {
+    width: 100%;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    outline: none;
+    padding: 11px 12px;
+    color: var(--color-text-main);
+    background: rgba(6, 8, 18, 0.72);
+    font: inherit;
+    transition: var(--transition-fast);
+}
+
+.notification-form-grid select:focus,
+.notification-form-grid input:focus,
+.notification-form-grid textarea:focus {
+    border-color: var(--color-secondary);
+    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.09);
+}
+
+.notification-form-grid option { color: var(--color-text-main); background: var(--color-card-solid); }
+.notification-form-grid .form-group small { color: var(--color-text-dark); font-size: 10px; }
+.notification-message-field { grid-column: 1 / -1; }
+.notification-message-field textarea { min-height: 104px; resize: vertical; }
+
+.notification-field-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--color-text-dark);
+    font-family: var(--font-mono);
+    font-size: 9px;
+}
+
+.notification-field-meta i { margin-right: 5px; color: var(--color-secondary); }
+.notification-actions { padding-top: 2px; border-top: 1px solid rgba(255, 255, 255, 0.045); }
+
 .inline-check {
     min-height: 40px;
     display: inline-flex;
@@ -1669,6 +1770,16 @@ tbody tr:last-child td { border-bottom: none; }
 .flag-state.is-on { color: var(--color-success); }
 .flag-state.is-locked { color: var(--color-warning); }
 
+.device-id-secondary {
+    display: block;
+    max-width: 220px;
+    margin-top: 3px;
+    overflow: hidden;
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 @media (max-width: 900px) {
     .control-toggle-grid,
     .remote-control-grid,
@@ -1679,6 +1790,10 @@ tbody tr:last-child td { border-bottom: none; }
     .grid-col-span-all { grid-column: auto; }
     .table-card-header { align-items: stretch; }
     .compact-search { max-width: none; }
+    .notification-form-grid { grid-template-columns: 1fr; }
+    .notification-message-field { grid-column: auto; }
+    .notification-command-heading { align-items: flex-start; flex-wrap: wrap; }
+    .delivery-chip { margin-left: 64px; }
 }
 
 /* ==========================================================================
