@@ -173,6 +173,21 @@ For the reusable Android/IMGUI architecture, security boundaries, control
 semantics, and acceptance checklist, see
 [`docs/android-imgui-integration.md`](docs/android-imgui-integration.md).
 
+## Drop-in Android/IMGUI SDK
+
+The package-stable client kit lives in
+[`client-sdk/android`](client-sdk/android/README.md). Install it into another
+Android IMGUI project with one command:
+
+```bash
+sh client-sdk/android/install.sh /absolute/path/to/project/app/src/main
+```
+
+The installer copies the Java/native sources, adds the Internet permission,
+patches common `Android.mk` projects, and preserves the fixed JNI bridge during
+R8/ProGuard. The host package and Activity name can be changed without editing
+the SDK bridge.
+
 Logout:
 
 ```http

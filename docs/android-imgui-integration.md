@@ -66,7 +66,8 @@ still be consumed by a hook.
 - Automatic reactivation only for a genuinely expired session. Explicit
   revocation and bans must stay locked.
 
-The reference implementation is in the sibling `aovjava` workspace under
+The tracked drop-in package is in [`client-sdk/android`](../client-sdk/android/README.md).
+The same implementation is used by the sibling `aovjava` workspace under
 `com.serverkey.sdk` and `jni/ServerKey`. Its project-specific adapter maps
 `menu_vip_core`, `menu_aim`, `menu_auto`, and `menu_information` to the existing
 IMGUI tabs and hook entry points.
