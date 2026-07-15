@@ -229,8 +229,8 @@
                     <div class="control-toggle-grid">
                         <label class="control-toggle-card" for="menu-enabled-input">
                             <span class="control-toggle-copy">
-                                <strong>Menu Enabled</strong>
-                                <small>Cho phép client mở giao diện sau xác thực</small>
+                                <strong>All Clients Enabled</strong>
+                                <small>Master switch cấp hoặc khóa quyền của mọi client</small>
                             </span>
                             <input type="checkbox" id="menu-enabled-input">
                             <span class="switch-track"></span>
@@ -245,8 +245,8 @@
                         </label>
                         <label class="control-toggle-card" for="auto-update-enabled-input">
                             <span class="control-toggle-copy">
-                                <strong>Auto Update</strong>
-                                <small>Bật hoặc khóa policy cập nhật từ xa</small>
+                                <strong>Auto Update Allowed</strong>
+                                <small>Chỉ điều khiển updater; không phải master client switch</small>
                             </span>
                             <input type="checkbox" id="auto-update-enabled-input">
                             <span class="switch-track"></span>
@@ -271,7 +271,7 @@
                             <input type="url" id="update-url-input" placeholder="https://example.com/releases/latest">
                         </div>
                         <div class="form-group grid-col-span-all">
-                            <label for="announcement-input">Thông báo hiển thị trên client</label>
+                            <label for="announcement-input">Client Announcement</label>
                             <textarea id="announcement-input" rows="3" maxlength="1000" placeholder="Thông báo bảo trì, changelog hoặc nội dung dành cho người dùng..."></textarea>
                         </div>
                     </form>
@@ -587,7 +587,7 @@
             <!-- FOOTER -->
             <footer class="dashboard-footer">
                 <span>© 2026 ServerKey Cloud · Owner Business Console</span>
-                <span class="footer-version">Control Plane v4.1</span>
+                <span class="footer-version">Control Plane v4.2</span>
             </footer>
         </div>
 

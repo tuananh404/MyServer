@@ -1,4 +1,4 @@
--- Setup and Migration Script for ServerKey Control Plane (v4.1)
+-- Setup and Migration Script for ServerKey Control Plane (v4.2)
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -128,7 +128,7 @@ VALUES
     ('menu_information', 'Information', 'Hiển thị nhóm thông tin và trạng thái.', TRUE, FALSE, 40)
 ON CONFLICT (feature_key) DO NOTHING;
 
--- 10. Migration logic for upgrading older schema (v1.0/v2.0/v3.0 -> v4.1)
+-- 10. Migration logic for upgrading older schema (v1.0/v2.0/v3.0 -> v4.2)
 DO $$
 BEGIN
     -- Add token_id to keys_management if it doesn't exist

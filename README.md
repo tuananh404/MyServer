@@ -1,4 +1,4 @@
-# ServerKey Control Plane v4.1
+# ServerKey Control Plane v4.2
 
 Web dashboard and API for license activation, device management, live client
 sessions, remote menu configuration, feature flags, and update policy.
@@ -99,6 +99,8 @@ Successful response:
 {
   "success": true,
   "authorized": true,
+  "authorization_code": "ok",
+  "authorization_message": "Client đã được ServerKey cấp quyền.",
   "token": "SKS_SESSION_TOKEN",
   "session_id": 12,
   "session_expires_at": "2026-07-16T12:00:00.000Z",
@@ -124,9 +126,12 @@ Successful response:
 }
 ```
 
-`authorized` becomes false when the global menu is disabled or maintenance mode
-is active. The client should display the server announcement and avoid entering
-its normal menu in that state.
+`authorized` becomes false when All Clients is disabled, maintenance mode is
+active, or the client version is missing, malformed, or below
+`minimum_version`. The client must display `authorization_message`/the server
+announcement and disable its runtime effects in that state.
+`auto_update_enabled` controls only the updater and is not a global access
+switch.
 
 ## Client heartbeat
 
@@ -144,6 +149,10 @@ The heartbeat returns the latest policy and feature flags. The client should use
 `heartbeat_interval_seconds`, with a minimum of 15 seconds. A banned device,
 banned/expired license, revoked session, maintenance state, or disabled menu is
 reported on the next heartbeat.
+
+For the reusable Android/IMGUI architecture, security boundaries, control
+semantics, and acceptance checklist, see
+[`docs/android-imgui-integration.md`](docs/android-imgui-integration.md).
 
 Logout:
 
@@ -190,7 +199,7 @@ Existing token, key, stats, and fraud-log admin routes remain compatible.
 2. Push this repository to GitHub.
 3. Import the repository into Vercel.
 4. Add the environment variables listed above.
-5. Deploy and verify `/api/health` reports `status: ok` and version `4.1.0`.
+5. Deploy and verify `/api/health` reports `status: ok` and version `4.2.0`.
 
 The GitHub/Vercel integration will redeploy automatically after later pushes to
 the configured production branch.

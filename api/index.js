@@ -158,6 +158,61 @@ function sanitizeString(value, maxLength, fallback = '') {
   return value.trim().slice(0, maxLength);
 }
 
+function parseVersionParts(value) {
+  const match = String(value || '').trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  return match ? match.slice(1, 4).map(Number) : null;
+}
+
+function compareVersions(left, right) {
+  const a = parseVersionParts(left);
+  const b = parseVersionParts(right);
+  if (!a || !b) return 0;
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return 0;
+}
+
+function getClientAuthorization(config, appVersion) {
+  const announcement = sanitizeString(config?.announcement, 1000);
+  if (config?.maintenance_mode) {
+    return {
+      authorized: false,
+      code: 'maintenance',
+      message: announcement || 'Hệ thống đang bảo trì.'
+    };
+  }
+  if (!config?.menu_enabled) {
+    return {
+      authorized: false,
+      code: 'all_clients_disabled',
+      message: announcement || 'Quyền truy cập của toàn bộ client đang bị khóa.'
+    };
+  }
+  if (config?.minimum_version && !parseVersionParts(appVersion)) {
+    return {
+      authorized: false,
+      code: 'invalid_version',
+      message: announcement || 'Client không cung cấp phiên bản semantic hợp lệ.'
+    };
+  }
+  if (config?.minimum_version && compareVersions(appVersion, config.minimum_version) < 0) {
+    return {
+      authorized: false,
+      code: 'upgrade_required',
+      message: announcement || `Cần cập nhật client lên phiên bản ${config.minimum_version} hoặc mới hơn.`
+    };
+  }
+  return {
+    authorized: true,
+    code: 'ok',
+    message: announcement || 'Client đã được ServerKey cấp quyền.'
+  };
+}
+
+app.locals.getClientAuthorization = getClientAuthorization;
+app.locals.compareVersions = compareVersions;
+
 async function getClientPolicy() {
   const [{ data: config, error: configError }, { data: flags, error: flagsError }] = await Promise.all([
     supabase.from('client_config').select('*').eq('id', 1).single(),
@@ -222,7 +277,7 @@ app.get('/api/health', async (req, res) => {
       status: 'degraded',
       database_configured: false,
       schema_ready: false,
-      version: '4.1.0',
+      version: '4.2.0',
       message: 'Database environment variables are missing.',
       timestamp: new Date().toISOString()
     });
@@ -238,7 +293,7 @@ app.get('/api/health', async (req, res) => {
     status: schemaReady ? 'ok' : 'migration_required',
     database_configured: true,
     schema_ready: schemaReady,
-    version: '4.1.0',
+    version: '4.2.0',
     message: schemaReady ? 'ServerKey control plane is operational.' : 'Run supabase.sql to install the v4 database schema.',
     timestamp: new Date().toISOString()
   });
@@ -767,12 +822,26 @@ app.get('/api/admin/control-config', verifyAdmin, async (req, res) => {
 
 app.patch('/api/admin/control-config', verifyAdmin, async (req, res) => {
   const heartbeat = Number.parseInt(req.body.heartbeat_interval_seconds, 10);
+  const minimumVersion = sanitizeString(req.body.minimum_version, 32, '1.0.0');
+  const latestVersion = sanitizeString(req.body.latest_version, 32, '1.0.0');
+  if (!parseVersionParts(minimumVersion) || !parseVersionParts(latestVersion)) {
+    return res.status(400).json({
+      success: false,
+      message: 'minimum_version and latest_version must use semantic version format, for example 1.2.3.'
+    });
+  }
+  if (compareVersions(latestVersion, minimumVersion) < 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'latest_version cannot be lower than minimum_version.'
+    });
+  }
   const update = {
     menu_enabled: Boolean(req.body.menu_enabled),
     maintenance_mode: Boolean(req.body.maintenance_mode),
     auto_update_enabled: Boolean(req.body.auto_update_enabled),
-    minimum_version: sanitizeString(req.body.minimum_version, 32, '1.0.0'),
-    latest_version: sanitizeString(req.body.latest_version, 32, '1.0.0'),
+    minimum_version: minimumVersion,
+    latest_version: latestVersion,
     update_url: sanitizeString(req.body.update_url, 500) || null,
     heartbeat_interval_seconds: Number.isInteger(heartbeat) && heartbeat >= 15 && heartbeat <= 3600 ? heartbeat : 45,
     announcement: sanitizeString(req.body.announcement, 1000) || null,
@@ -1116,9 +1185,12 @@ async function handleClientActivation(req, res) {
     if (sessionError) throw sessionError;
 
     const policy = await getClientPolicy();
+    const authorization = getClientAuthorization(policy.config, appVersion);
     return res.json({
       success: true,
-      authorized: policy.config.menu_enabled && !policy.config.maintenance_mode,
+      authorized: authorization.authorized,
+      authorization_code: authorization.code,
+      authorization_message: authorization.message,
       message: 'Activation successful',
       token: rawSessionToken,
       session_id: session.id,
@@ -1144,7 +1216,12 @@ async function authenticateClientSession(req, res) {
   const authHeader = req.headers.authorization || '';
   const rawToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
   if (!rawToken) {
-    res.status(401).json({ success: false, authorized: false, message: 'Missing client session token.' });
+    res.status(401).json({
+      success: false,
+      authorized: false,
+      code: 'session_missing',
+      message: 'Missing client session token.'
+    });
     return null;
   }
 
@@ -1154,11 +1231,24 @@ async function authenticateClientSession(req, res) {
     .eq('session_token_hash', hashSessionToken(rawToken))
     .maybeSingle();
   if (error) throw error;
-  if (!session || session.status !== 'active' || new Date(session.expires_at) <= new Date()) {
-    if (session?.status === 'active') {
+  const expiredByTime = session && new Date(session.expires_at) <= new Date();
+  if (!session || session.status !== 'active' || expiredByTime) {
+    if (session?.status === 'active' && expiredByTime) {
       await supabase.from('client_sessions').update({ status: 'expired' }).eq('id', session.id);
     }
-    res.status(401).json({ success: false, authorized: false, message: 'Client session is invalid or expired.' });
+    const code = !session
+      ? 'session_invalid'
+      : (expiredByTime || session.status === 'expired')
+        ? 'session_expired'
+        : 'session_revoked';
+    res.status(401).json({
+      success: false,
+      authorized: false,
+      code,
+      message: code === 'session_expired'
+        ? 'Client session expired.'
+        : 'Client session was revoked or is invalid.'
+    });
     return null;
   }
   return session;
@@ -1195,9 +1285,12 @@ app.post('/api/v1/client/heartbeat', async (req, res) => {
     ]);
 
     const policy = await getClientPolicy();
+    const authorization = getClientAuthorization(policy.config, appVersion);
     return res.json({
       success: true,
-      authorized: policy.config.menu_enabled && !policy.config.maintenance_mode,
+      authorized: authorization.authorized,
+      authorization_code: authorization.code,
+      authorization_message: authorization.message,
       server_time: now,
       session_expires_at: session.expires_at,
       license_expires_at: license.expires_at,

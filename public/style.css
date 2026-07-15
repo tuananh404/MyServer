@@ -1,5 +1,5 @@
 /* ==========================================================================
-   DESIGN SYSTEM & VARIABLES — ServerKey Premium Console v4.1
+   DESIGN SYSTEM & VARIABLES — ServerKey Premium Console v4.2
    ========================================================================== */
 :root {
     --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -1682,7 +1682,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* ==========================================================================
-   SERVERKEY BUSINESS CONSOLE v4.1 — FINAL LAYOUT OVERRIDES
+   SERVERKEY BUSINESS CONSOLE v4.2 — FINAL LAYOUT OVERRIDES
    ========================================================================== */
 body {
     background:
