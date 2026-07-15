@@ -1,6 +1,6 @@
 /**
- * Client-side Controller for Owner Dashboard v3.0
- * Token-based key management system
+ * ServerKey Cloud Business Control Center v4.1
+ * Real-state owner dashboard for licenses, devices and remote client policy.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -14,6 +14,9 @@ document.addEventListener('DOMContentLoaded', () => {
         featureFlags: [],
         devices: [],
         sessions: [],
+        health: null,
+        moduleErrors: {},
+        currentView: localStorage.getItem('dashboard_view') || 'overview',
         stats: { total: 0, unactivated: 0, activated: 0, expired: 0, banned: 0, fraudAlerts: 0, totalTokens: 0, devices: 0, activeSessions: 0 },
         selectedDuration: 1,
         selectedTokenId: null,
@@ -31,6 +34,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusIndicator = document.getElementById('status-indicator');
     const logoutBtn = document.getElementById('logout-btn');
     const refreshBtn = document.getElementById('refresh-btn');
+    const systemBanner = document.getElementById('system-banner');
+    const systemBannerIcon = document.getElementById('system-banner-icon');
+    const systemBannerTitle = document.getElementById('system-banner-title');
+    const systemBannerMessage = document.getElementById('system-banner-message');
+    const currentViewTitle = document.getElementById('current-view-title');
+    const currentViewDescription = document.getElementById('current-view-description');
+    const currentDateLabel = document.getElementById('current-date-label');
+    const overviewStatusTitle = document.getElementById('overview-status-title');
+    const overviewStatusCopy = document.getElementById('overview-status-copy');
+    const overviewRevision = document.getElementById('overview-revision');
+    const navLicenseCount = document.getElementById('nav-license-count');
+    const navDeviceCount = document.getElementById('nav-device-count');
+    const navAlertCount = document.getElementById('nav-alert-count');
 
     // Token management elements
     const tokenForm = document.getElementById('token-form');
@@ -72,6 +88,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalMessage = document.getElementById('modal-message');
     const modalBtnCancel = document.getElementById('modal-btn-cancel');
     const modalBtnConfirm = document.getElementById('modal-btn-confirm');
+    const modalReasonGroup = document.getElementById('modal-reason-group');
+    const modalReasonInput = document.getElementById('modal-reason-input');
 
     // Control plane elements
     const menuEnabledInput = document.getElementById('menu-enabled-input');
@@ -102,11 +120,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Auto-refresh interval
     let refreshIntervalId = null;
+    let currentModalOptions = {};
+
+    const viewMeta = {
+        overview: {
+            title: 'Tổng quan hệ thống',
+            description: 'Trạng thái vận hành và chính sách client theo thời gian thực.'
+        },
+        licenses: {
+            title: 'Sản phẩm & Licenses',
+            description: 'Tạo package, phát hành license và quản lý vòng đời truy cập.'
+        },
+        devices: {
+            title: 'Thiết bị khách hàng',
+            description: 'Theo dõi thiết bị, phiên bản client, license liên kết và trạng thái khóa.'
+        },
+        features: {
+            title: 'Menu Control',
+            description: 'Điều khiển feature flags và trạng thái hiển thị trên client.'
+        },
+        security: {
+            title: 'Sessions & Bảo mật',
+            description: 'Giám sát heartbeat, thu hồi phiên và xem sự kiện bảo mật thực tế.'
+        }
+    };
 
     // ==========================================
     // INITIALIZATION & SESSION CONTROL
     // ==========================================
     function init() {
+        currentDateLabel.textContent = new Intl.DateTimeFormat('vi-VN', {
+            weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric'
+        }).format(new Date());
+        setActiveView(viewMeta[state.currentView] ? state.currentView : 'overview', false);
         if (state.adminToken) {
             verifyTokenAndStart();
         } else {
@@ -116,13 +162,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function verifyTokenAndStart() {
         showLoadingState();
-        const success = await loadData();
-        if (success) {
+        const result = await loadData();
+        if (result.success) {
             showDashboard();
             startAutoRefresh();
-        } else {
-            showToast('Phiên làm việc hết hạn. Vui lòng đăng nhập lại.', 'error');
+            if (result.partial) {
+                showToast(`Đã đăng nhập nhưng ${result.failedModules.length} khu vực chưa tải được.`, 'warning');
+            }
+        } else if (result.unauthorized) {
+            showToast('Phiên quản trị đã hết hạn hoặc không hợp lệ.', 'error');
             clearSession();
+            showLogin();
+        } else {
+            showToast(result.message || 'Không tải được dữ liệu hệ thống.', 'error');
             showLogin();
         }
     }
@@ -143,6 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function showDashboard() {
         loginContainer.classList.add('hidden');
         dashboardContainer.classList.remove('hidden');
+        setActiveView(state.currentView, false);
     }
 
     function showLoadingState() {
@@ -164,70 +217,113 @@ document.addEventListener('DOMContentLoaded', () => {
             headers['Authorization'] = `Bearer ${state.adminToken}`;
         }
 
-        const config = { method, headers };
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const config = { method, headers, signal: controller.signal };
         if (body) config.body = JSON.stringify(body);
 
         try {
             const response = await fetch(endpoint, config);
-            if (response.status === 401 || response.status === 403) {
-                if (endpoint.includes('/get-keys') || endpoint.includes('/stats') || endpoint.includes('/get-tokens')) {
-                    return { success: false, status: response.status, message: 'Unauthorized' };
+            const raw = await response.text();
+            let data = {};
+            if (raw) {
+                try {
+                    data = JSON.parse(raw);
+                } catch {
+                    data = { message: `Máy chủ trả dữ liệu không hợp lệ (HTTP ${response.status}).` };
                 }
-                showToast('Phiên làm việc hết hạn.', 'error');
-                clearSession();
-                showLogin();
-                return { success: false, status: response.status, message: 'Unauthorized' };
             }
-            const data = await response.json();
-            return { success: response.ok, status: response.status, data };
+            return {
+                success: response.ok,
+                unauthorized: response.status === 401 || response.status === 403,
+                status: response.status,
+                data,
+                message: data.message || `HTTP ${response.status}`,
+                endpoint
+            };
         } catch (error) {
             console.error(`API request failed [${endpoint}]:`, error);
-            return { success: false, error: true, message: 'Network error' };
+            return {
+                success: false,
+                networkError: true,
+                status: 0,
+                endpoint,
+                message: error.name === 'AbortError'
+                    ? 'Yêu cầu hết thời gian chờ sau 15 giây.'
+                    : 'Không thể kết nối đến máy chủ.'
+            };
+        } finally {
+            clearTimeout(timeoutId);
         }
     }
 
+    async function loadHealth() {
+        const result = await apiRequest('/api/health');
+        state.health = result.data || null;
+        return result;
+    }
+
     async function loadData() {
-        const [keysRes, fraudRes, statsRes, tokensRes, controlRes, devicesRes, sessionsRes] = await Promise.all([
-            apiRequest('/api/admin/get-keys'),
-            apiRequest('/api/admin/get-fraud'),
-            apiRequest('/api/admin/stats'),
-            apiRequest('/api/admin/get-tokens'),
-            apiRequest('/api/admin/control-config'),
-            apiRequest('/api/admin/devices'),
-            apiRequest('/api/admin/sessions')
+        updateApiStatus('loading', 'Đang đồng bộ');
+        const endpointMap = {
+            keys: '/api/admin/get-keys',
+            fraud: '/api/admin/get-fraud',
+            stats: '/api/admin/stats',
+            tokens: '/api/admin/get-tokens',
+            control: '/api/admin/control-config',
+            devices: '/api/admin/devices',
+            sessions: '/api/admin/sessions'
+        };
+        const names = Object.keys(endpointMap);
+        const [healthResult, ...responses] = await Promise.all([
+            loadHealth(),
+            ...names.map(name => apiRequest(endpointMap[name]))
         ]);
+        const modules = Object.fromEntries(names.map((name, index) => [name, responses[index]]));
+        state.moduleErrors = Object.fromEntries(
+            Object.entries(modules)
+                .filter(([, result]) => !result.success)
+                .map(([name, result]) => [name, result.message])
+        );
 
-        if (keysRes.success && fraudRes.success) {
-            state.keysList = keysRes.data.keys || [];
-            state.fraudLogs = fraudRes.data.logs || [];
-            if (statsRes.success) {
-                state.stats = statsRes.data.stats;
-            }
-            if (tokensRes.success) {
-                state.tokensList = tokensRes.data.tokens || [];
-            }
-            if (controlRes.success) {
-                state.controlConfig = controlRes.data.config || null;
-                state.featureFlags = Object.entries(controlRes.data.features || {}).map(([feature_key, flag]) => ({ feature_key, ...flag }));
-            }
-            if (devicesRes.success) state.devices = devicesRes.data.devices || [];
-            if (sessionsRes.success) state.sessions = sessionsRes.data.sessions || [];
-
-            updateApiStatus(true);
-            renderStats();
-            renderKeys();
-            renderFraudLogs();
-            renderTokens();
-            renderTokenSelect();
-            renderControlPlane();
-            renderFeatureFlags();
-            renderDevices();
-            renderSessions();
-            return true;
-        } else {
-            updateApiStatus(false);
-            return false;
+        const unauthorized = Object.values(modules).some(result => result.unauthorized);
+        if (unauthorized) {
+            updateApiStatus('offline', 'Phiên không hợp lệ');
+            return { success: false, unauthorized: true, message: 'Phiên quản trị không hợp lệ.' };
         }
+
+        if (modules.keys.success) state.keysList = modules.keys.data.keys || [];
+        if (modules.fraud.success) state.fraudLogs = modules.fraud.data.logs || [];
+        if (modules.stats.success) state.stats = modules.stats.data.stats || state.stats;
+        if (modules.tokens.success) state.tokensList = modules.tokens.data.tokens || [];
+        if (modules.control.success) {
+            state.controlConfig = modules.control.data.config || null;
+            state.featureFlags = Object.entries(modules.control.data.features || {})
+                .map(([feature_key, flag]) => ({ feature_key, ...flag }));
+        }
+        if (modules.devices.success) state.devices = modules.devices.data.devices || [];
+        if (modules.sessions.success) state.sessions = modules.sessions.data.sessions || [];
+
+        renderStats();
+        renderKeys();
+        renderFraudLogs();
+        renderTokens();
+        renderTokenSelect();
+        renderControlPlane();
+        renderFeatureFlags();
+        renderDevices();
+        renderSessions();
+        renderNavigationCounts();
+
+        const failedModules = Object.keys(state.moduleErrors);
+        const criticalReady = modules.keys.success && modules.tokens.success;
+        updateSystemState(healthResult, failedModules);
+        return {
+            success: criticalReady,
+            partial: criticalReady && failedModules.length > 0,
+            failedModules,
+            message: criticalReady ? '' : (modules.keys.message || modules.tokens.message || 'Không tải được dữ liệu licenses.')
+        };
     }
 
     async function loadTokens() {
@@ -239,20 +335,64 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function updateApiStatus(connected) {
-        const dot = statusIndicator.querySelector('.pulse-dot');
-        if (connected) {
-            apiStatusText.innerText = 'Connected';
-            dot.style.backgroundColor = '';
+    function updateApiStatus(mode, label) {
+        statusIndicator.classList.remove('status-loading', 'status-online', 'status-degraded', 'status-offline');
+        statusIndicator.classList.add(`status-${mode}`);
+        apiStatusText.textContent = label;
+    }
+
+    function updateSystemState(healthResult, failedModules) {
+        const health = healthResult.data || null;
+        const schemaReady = Boolean(health?.schema_ready);
+        const healthOnline = healthResult.status > 0;
+        systemBanner.classList.remove('hidden', 'is-warning', 'is-error', 'is-success');
+
+        if (!healthOnline) {
+            updateApiStatus('offline', 'Mất kết nối');
+            systemBanner.classList.add('is-error');
+            systemBannerIcon.className = 'fa-solid fa-cloud-bolt';
+            systemBannerTitle.textContent = 'Không thể kết nối API';
+            systemBannerMessage.textContent = healthResult.message;
+            overviewStatusTitle.textContent = 'Chưa xác nhận được trạng thái hệ thống';
+            overviewStatusCopy.textContent = healthResult.message;
+        } else if (!schemaReady) {
+            updateApiStatus('degraded', 'Cần migration');
+            systemBanner.classList.add('is-warning');
+            systemBannerIcon.className = 'fa-solid fa-database';
+            systemBannerTitle.textContent = health?.status === 'migration_required' ? 'Database chưa sẵn sàng' : 'Hệ thống đang ở trạng thái giới hạn';
+            systemBannerMessage.textContent = health?.message || 'API chưa xác nhận schema database.';
+            overviewStatusTitle.textContent = 'Cần hoàn tất database migration';
+            overviewStatusCopy.textContent = health?.message || 'Một số module sẽ chưa hoạt động cho đến khi schema sẵn sàng.';
+        } else if (failedModules.length > 0) {
+            updateApiStatus('degraded', `${failedModules.length} module lỗi`);
+            systemBanner.classList.add('is-warning');
+            systemBannerIcon.className = 'fa-solid fa-triangle-exclamation';
+            systemBannerTitle.textContent = 'Dữ liệu chỉ được tải một phần';
+            systemBannerMessage.textContent = `Không tải được: ${failedModules.join(', ')}. Các khu vực khác vẫn dùng dữ liệu thật từ API.`;
+            overviewStatusTitle.textContent = 'Một số module chưa đồng bộ';
+            overviewStatusCopy.textContent = systemBannerMessage.textContent;
         } else {
-            apiStatusText.innerText = 'Offline';
-            dot.style.backgroundColor = 'var(--color-danger)';
+            updateApiStatus('online', 'Hệ thống online');
+            systemBanner.classList.add('hidden');
+            overviewStatusTitle.textContent = 'Hệ thống đang vận hành ổn định';
+            overviewStatusCopy.textContent = 'API, database và các module quản trị đã phản hồi thành công.';
         }
+
+        overviewRevision.textContent = state.controlConfig
+            ? `Config revision ${state.controlConfig.config_revision || 1}`
+            : 'Config revision —';
     }
 
     function startAutoRefresh() {
         stopAutoRefresh();
-        refreshIntervalId = setInterval(() => loadData(), 12000);
+        refreshIntervalId = setInterval(async () => {
+            const result = await loadData();
+            if (result.unauthorized) {
+                clearSession();
+                showLogin();
+                showToast('Phiên quản trị đã hết hạn. Vui lòng đăng nhập lại.', 'error');
+            }
+        }, 30000);
     }
 
     function stopAutoRefresh() {
@@ -260,6 +400,37 @@ document.addEventListener('DOMContentLoaded', () => {
             clearInterval(refreshIntervalId);
             refreshIntervalId = null;
         }
+    }
+
+    function setActiveView(view, shouldScroll = true) {
+        const selected = viewMeta[view] ? view : 'overview';
+        state.currentView = selected;
+        localStorage.setItem('dashboard_view', selected);
+        document.querySelectorAll('.dashboard-nav-item').forEach(button => {
+            const active = button.dataset.view === selected;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-current', active ? 'page' : 'false');
+        });
+        document.querySelectorAll('[data-view-section]').forEach(section => {
+            section.classList.toggle('view-hidden', section.dataset.viewSection !== selected);
+        });
+        currentViewTitle.textContent = viewMeta[selected].title;
+        currentViewDescription.textContent = viewMeta[selected].description;
+        if (shouldScroll) {
+            document.querySelector('.page-heading').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    function renderNavigationCounts() {
+        navLicenseCount.textContent = state.moduleErrors.stats && state.moduleErrors.keys
+            ? '—'
+            : String(state.moduleErrors.stats ? state.keysList.length : (state.stats.total || 0));
+        navDeviceCount.textContent = state.moduleErrors.stats && state.moduleErrors.devices
+            ? '—'
+            : String(state.moduleErrors.stats ? state.devices.length : (state.stats.devices || 0));
+        navAlertCount.textContent = state.moduleErrors.stats && state.moduleErrors.fraud
+            ? '—'
+            : String(state.moduleErrors.stats ? state.fraudLogs.length : (state.stats.fraudAlerts || 0));
     }
 
     // ==========================================
@@ -286,17 +457,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // RENDER FUNCTIONS
     // ==========================================
+    function tableErrorRow(message, colspan) {
+        return `<tr class="module-error-row"><td colspan="${colspan}" class="loading-state"><i class="fa-solid fa-circle-exclamation"></i> ${escapeHTML(message)}</td></tr>`;
+    }
+
     function renderStats() {
         document.querySelectorAll('[data-stat]').forEach(el => {
             const key = el.getAttribute('data-stat');
-            if (state.stats[key] !== undefined) {
+            if (state.moduleErrors.stats) {
+                el.textContent = '—';
+                el.title = state.moduleErrors.stats;
+            } else if (state.stats[key] !== undefined) {
+                el.removeAttribute('title');
                 animateCounter(el, state.stats[key]);
             }
         });
 
         // Fraud card glow on stat card
         const fraudStatCard = document.getElementById('stat-fraud');
-        if (state.stats.fraudAlerts > 0) {
+        if (!state.moduleErrors.stats && state.stats.fraudAlerts > 0) {
             fraudStatCard.style.borderColor = 'rgba(244, 63, 94, 0.3)';
         } else {
             fraudStatCard.style.borderColor = '';
@@ -304,11 +483,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderTokens() {
+        if (state.moduleErrors.tokens) {
+            tokensTableBody.innerHTML = tableErrorRow(state.moduleErrors.tokens, 6);
+            return;
+        }
         if (state.tokensList.length === 0) {
             tokensTableBody.innerHTML = `
                 <tr>
                     <td colspan="6" class="loading-state">
-                        <i class="fa-solid fa-cube" style="opacity:0.3;"></i> Chưa có Token nào
+                        <i class="fa-solid fa-cube" style="opacity:0.3;"></i> Chưa có sản phẩm nào
                     </td>
                 </tr>
             `;
@@ -322,13 +505,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             return `
                 <tr>
-                    <td><strong>${escapeHTML(token.token_name)}</strong></td>
-                    <td class="key-string-cell">${escapeHTML(token.token_string || token.id)}</td>
-                    <td>${maxDaysDisplay}</td>
-                    <td><span style="font-size:12px; font-family:var(--font-mono); color: var(--color-primary);">${escapeHTML(token.display_text || 'ServerKey by #wtuananh6868')}</span></td>
-                    <td><span style="font-size:12px; color: var(--color-text-muted);">${escapeHTML(token.description || '')}</span></td>
-                    <td class="actions-cell">
-                        <button class="btn btn-danger-outline btn-sm action-delete-token" data-token-id="${token.id}" title="Xóa Token">
+                    <td data-label="Package"><strong>${escapeHTML(token.token_name)}</strong></td>
+                    <td data-label="Token" class="key-string-cell">${escapeHTML(token.token_string || token.id)}</td>
+                    <td data-label="Max days">${maxDaysDisplay}</td>
+                    <td data-label="Display text"><span style="font-size:12px; font-family:var(--font-mono); color: var(--color-primary);">${escapeHTML(token.display_text || 'ServerKey by #wtuananh6868')}</span></td>
+                    <td data-label="Mô tả"><span style="font-size:12px; color: var(--color-text-muted);">${escapeHTML(token.description || '')}</span></td>
+                    <td data-label="Hành động" class="actions-cell">
+                        <button class="btn btn-danger-outline btn-sm action-delete-token" data-token-id="${token.id}" title="Xóa sản phẩm">
                             <i class="fa-solid fa-trash-can"></i>
                         </button>
                     </td>
@@ -342,13 +525,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tokenId = btn.getAttribute('data-token-id');
                 const token = state.tokensList.find(t => String(t.id) === tokenId);
                 const tokenName = token ? token.token_name : tokenId;
-                confirmAction('Xóa Token', `<strong style="color:var(--color-danger)">Hành động không thể hoàn tác!</strong><br>Xóa Token: <strong>${escapeHTML(tokenName)}</strong>?<br><small style="color:var(--color-text-dark)">Các key liên kết cũng sẽ bị xóa.</small>`, async () => {
+                confirmAction('Xóa sản phẩm', `<strong style="color:var(--color-danger)">Hành động không thể hoàn tác!</strong><br>Xóa sản phẩm: <strong>${escapeHTML(tokenName)}</strong>?<br><small style="color:var(--color-text-dark)">Các license liên kết cũng sẽ bị xóa.</small>`, async () => {
                     const res = await apiRequest('/api/admin/delete-token', 'DELETE', { token_id: tokenId });
                     if (res.success) {
-                        showToast(`Đã xóa Token "${tokenName}".`, 'success');
+                        showToast(`Đã xóa sản phẩm "${tokenName}".`, 'success');
                         loadData();
                     } else {
-                        showToast(`Lỗi: ${res.data?.message || 'Unknown error'}`, 'error');
+                        showToast(res.message || 'Không thể xóa package.', 'error');
                     }
                 });
             });
@@ -356,11 +539,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderTokenSelect() {
+        if (state.moduleErrors.tokens) {
+            tokenSelect.innerHTML = '<option value="" selected>Không tải được danh sách sản phẩm</option>';
+            tokenSelect.disabled = true;
+            createKeyBtn.disabled = true;
+            state.selectedTokenId = null;
+            return;
+        }
+
+        tokenSelect.disabled = false;
+        createKeyBtn.disabled = false;
         // Preserve current selection if possible
         const prevSelected = state.selectedTokenId;
 
         // Clear existing options except default
-        tokenSelect.innerHTML = '<option value="" disabled>-- Chọn Token --</option>';
+        tokenSelect.innerHTML = '<option value="" disabled>-- Chọn sản phẩm --</option>';
 
         state.tokensList.forEach(token => {
             const maxDaysLabel = token.max_days ? ` (${token.max_days}d)` : ' (∞)';
@@ -373,9 +566,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Auto-select if only 1 token
         if (state.tokensList.length === 1) {
             tokenSelect.value = state.tokensList[0].id;
-            state.selectedTokenId = state.tokensList[0].id;
+            state.selectedTokenId = String(state.tokensList[0].id);
             updatePresetStates();
-        } else if (prevSelected && state.tokensList.find(t => t.id === prevSelected)) {
+        } else if (prevSelected && state.tokensList.find(t => String(t.id) === String(prevSelected))) {
             tokenSelect.value = prevSelected;
             state.selectedTokenId = prevSelected;
             updatePresetStates();
@@ -387,7 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getSelectedToken() {
         if (!state.selectedTokenId) return null;
-        return state.tokensList.find(t => t.id === state.selectedTokenId) || null;
+        return state.tokensList.find(t => String(t.id) === String(state.selectedTokenId)) || null;
     }
 
     function updatePresetStates() {
@@ -427,7 +620,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const duration = parseInt(durationInput.value);
         if (duration === -1 || (duration > token.max_days)) {
             tokenWarning.classList.remove('hidden');
-            tokenWarning.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Token "${escapeHTML(token.token_name)}" giới hạn tối đa ${token.max_days} ngày`;
+            tokenWarning.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Sản phẩm "${escapeHTML(token.token_name)}" giới hạn tối đa ${token.max_days} ngày`;
             return false;
         }
 
@@ -437,6 +630,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderKeys() {
+        if (state.moduleErrors.keys) {
+            keysTableBody.innerHTML = tableErrorRow(state.moduleErrors.keys, 8);
+            return;
+        }
         const query = searchKeyInput.value.toLowerCase().trim();
         const filteredKeys = state.keysList.filter(key => {
             const keyMatch = key.key_string.toLowerCase().includes(query);
@@ -449,7 +646,7 @@ document.addEventListener('DOMContentLoaded', () => {
             keysTableBody.innerHTML = `
                 <tr>
                     <td colspan="8" class="loading-state">
-                        <i class="fa-solid fa-folder-open" style="opacity:0.3;"></i> Không tìm thấy keys nào
+                        <i class="fa-solid fa-folder-open" style="opacity:0.3;"></i> Không tìm thấy license nào
                     </td>
                 </tr>
             `;
@@ -495,37 +692,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Reset HWID button (only when activated or expired)
             if (key.status === 'activated' || key.status === 'expired') {
-                actionButtons += `<button class="btn btn-outline btn-sm action-reset-hwid" data-key="${key.key_string}" title="Reset HWID">
+                actionButtons += `<button class="btn btn-outline btn-sm action-reset-hwid" data-key="${escapeHTML(key.key_string)}" title="Reset HWID">
                     <i class="fa-solid fa-arrows-rotate"></i>
                 </button>`;
             }
 
             // Ban/Unban button
             if (key.status === 'banned') {
-                actionButtons += `<button class="btn btn-warning-outline btn-sm action-unban-key" data-key="${key.key_string}" title="Mở khóa Key">
+                actionButtons += `<button class="btn btn-warning-outline btn-sm action-unban-key" data-key="${escapeHTML(key.key_string)}" title="Mở khóa Key">
                     <i class="fa-solid fa-lock-open"></i>
                 </button>`;
             } else {
-                actionButtons += `<button class="btn btn-danger-outline btn-sm action-ban-key" data-key="${key.key_string}" title="Khóa Key">
+                actionButtons += `<button class="btn btn-danger-outline btn-sm action-ban-key" data-key="${escapeHTML(key.key_string)}" title="Khóa Key">
                     <i class="fa-solid fa-ban"></i>
                 </button>`;
             }
 
             // Delete button
-            actionButtons += `<button class="btn btn-danger-outline btn-sm action-delete-key" data-key="${key.key_string}" title="Xóa Key">
+            actionButtons += `<button class="btn btn-danger-outline btn-sm action-delete-key" data-key="${escapeHTML(key.key_string)}" title="Xóa Key">
                 <i class="fa-solid fa-trash-can"></i>
             </button>`;
 
             return `
                 <tr>
-                    <td class="key-string-cell">${escapeHTML(key.key_string)}</td>
-                    <td>${tokenDisplay}</td>
-                    <td>${durationDisplay}</td>
-                    <td style="font-size:12px;">${expiryDisplay}</td>
-                    <td>${deviceDisplay}</td>
-                    <td>${statusBadge}</td>
-                    <td><span style="font-size:12px; color: var(--color-text-muted);">${escapeHTML(key.note || '')}</span></td>
-                    <td class="actions-cell">${actionButtons}</td>
+                    <td data-label="License" class="key-string-cell">${escapeHTML(key.key_string)}</td>
+                    <td data-label="Package">${tokenDisplay}</td>
+                    <td data-label="Thời hạn">${durationDisplay}</td>
+                    <td data-label="Hết hạn" style="font-size:12px;">${expiryDisplay}</td>
+                    <td data-label="Thiết bị">${deviceDisplay}</td>
+                    <td data-label="Trạng thái">${statusBadge}</td>
+                    <td data-label="Ghi chú"><span style="font-size:12px; color: var(--color-text-muted);">${escapeHTML(key.note || '—')}</span></td>
+                    <td data-label="Hành động" class="actions-cell">${actionButtons}</td>
                 </tr>
             `;
         }).join('');
@@ -539,13 +736,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.action-reset-hwid').forEach(btn => {
             btn.addEventListener('click', () => {
                 const key = btn.getAttribute('data-key');
-                confirmAction('Đặt lại HWID', `Reset Hardware ID cho Key: <strong>${key}</strong>?<br><small style="color:var(--color-text-dark)">Khách hàng sẽ kích hoạt được thiết bị mới.</small>`, async () => {
+                confirmAction('Đặt lại HWID', `Reset Hardware ID cho Key: <strong>${escapeHTML(key)}</strong>?<br><small style="color:var(--color-text-dark)">Khách hàng sẽ kích hoạt được thiết bị mới.</small>`, async () => {
                     const res = await apiRequest('/api/admin/reset-hwid', 'POST', { key_string: key });
                     if (res.success) {
                         showToast(`Reset HWID cho ${key} thành công.`, 'success');
                         loadData();
                     } else {
-                        showToast(`Lỗi: ${res.data?.message || 'Unknown error'}`, 'error');
+                        showToast(res.message || 'Không thể reset HWID.', 'error');
                     }
                 });
             });
@@ -555,13 +752,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.action-ban-key').forEach(btn => {
             btn.addEventListener('click', () => {
                 const key = btn.getAttribute('data-key');
-                confirmAction('Khóa Key', `Bạn muốn <strong>cấm</strong> Key: <strong>${key}</strong>?<br><small style="color:var(--color-text-dark)">Key bị khóa sẽ không thể sử dụng để đăng nhập.</small>`, async () => {
+                confirmAction('Khóa Key', `Bạn muốn <strong>cấm</strong> Key: <strong>${escapeHTML(key)}</strong>?<br><small style="color:var(--color-text-dark)">Session đang hoạt động cũng sẽ bị thu hồi.</small>`, async () => {
                     const res = await apiRequest('/api/admin/ban-key', 'POST', { key_string: key, action: 'ban' });
                     if (res.success) {
                         showToast(`Đã khóa Key ${key}.`, 'success');
                         loadData();
                     } else {
-                        showToast(`Lỗi: ${res.data?.message || 'Unknown error'}`, 'error');
+                        showToast(res.message || 'Không thể khóa license.', 'error');
                     }
                 });
             });
@@ -571,13 +768,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.action-unban-key').forEach(btn => {
             btn.addEventListener('click', () => {
                 const key = btn.getAttribute('data-key');
-                confirmAction('Mở khóa Key', `Mở khóa Key: <strong>${key}</strong>?<br><small style="color:var(--color-text-dark)">Key sẽ trở về trạng thái sẵn sàng, HWID sẽ được reset.</small>`, async () => {
+                confirmAction('Mở khóa Key', `Mở khóa Key: <strong>${escapeHTML(key)}</strong>?<br><small style="color:var(--color-text-dark)">Key sẽ trở về trạng thái sẵn sàng, HWID sẽ được reset.</small>`, async () => {
                     const res = await apiRequest('/api/admin/ban-key', 'POST', { key_string: key, action: 'unban' });
                     if (res.success) {
                         showToast(`Đã mở khóa Key ${key}.`, 'success');
                         loadData();
                     } else {
-                        showToast(`Lỗi: ${res.data?.message || 'Unknown error'}`, 'error');
+                        showToast(res.message || 'Không thể mở khóa license.', 'error');
                     }
                 });
             });
@@ -587,13 +784,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.action-delete-key').forEach(btn => {
             btn.addEventListener('click', () => {
                 const key = btn.getAttribute('data-key');
-                confirmAction('Xóa Key', `<strong style="color:var(--color-danger)">Hành động không thể hoàn tác!</strong><br>Xóa vĩnh viễn Key: <strong>${key}</strong>?`, async () => {
+                confirmAction('Xóa Key', `<strong style="color:var(--color-danger)">Hành động không thể hoàn tác!</strong><br>Xóa vĩnh viễn Key: <strong>${escapeHTML(key)}</strong>?`, async () => {
                     const res = await apiRequest('/api/admin/delete-key', 'DELETE', { key_string: key });
                     if (res.success) {
                         showToast(`Đã xóa Key ${key}.`, 'success');
                         loadData();
                     } else {
-                        showToast(`Lỗi: ${res.data?.message || 'Unknown error'}`, 'error');
+                        showToast(res.message || 'Không thể xóa license.', 'error');
                     }
                 });
             });
@@ -601,12 +798,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderFraudLogs() {
+        if (state.moduleErrors.fraud) {
+            fraudLogsEmpty.classList.remove('hidden');
+            fraudLogsList.classList.add('hidden');
+            fraudCard.classList.remove('has-fraud');
+            clearFraudBtn.classList.add('hidden');
+            fraudSubtitle.textContent = state.moduleErrors.fraud;
+            fraudLogsEmpty.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i><p>${escapeHTML(state.moduleErrors.fraud)}</p>`;
+            return;
+        }
         if (state.fraudLogs.length === 0) {
             fraudLogsEmpty.classList.remove('hidden');
             fraudLogsList.classList.add('hidden');
             fraudCard.classList.remove('has-fraud');
             clearFraudBtn.classList.add('hidden');
             fraudSubtitle.innerText = 'Không có vi phạm mới được phát hiện';
+            fraudLogsEmpty.innerHTML = '<i class="fa-solid fa-shield-halved"></i><p>Không có hoạt động gian lận</p>';
             return;
         }
 
@@ -646,11 +853,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderControlPlane() {
         const config = state.controlConfig;
-        if (!config) {
+        const inputs = [menuEnabledInput, maintenanceModeInput, autoUpdateEnabledInput,
+            minimumVersionInput, latestVersionInput, updateUrlInput,
+            heartbeatIntervalInput, announcementInput];
+
+        if (state.moduleErrors.control) {
+            inputs.forEach(input => { input.disabled = true; });
             configRevision.textContent = 'Revision —';
-            controlSaveStatus.textContent = 'Chưa có migration v4 hoặc không tải được policy';
+            controlSaveStatus.textContent = state.moduleErrors.control;
+            saveControlBtn.disabled = true;
             return;
         }
+
+        if (!config) {
+            inputs.forEach(input => { input.disabled = true; });
+            configRevision.textContent = 'Revision —';
+            controlSaveStatus.textContent = 'API chưa trả về remote policy.';
+            saveControlBtn.disabled = true;
+            return;
+        }
+
+        inputs.forEach(input => { input.disabled = false; });
+        saveControlBtn.disabled = false;
 
         menuEnabledInput.checked = Boolean(config.menu_enabled);
         maintenanceModeInput.checked = Boolean(config.maintenance_mode);
@@ -665,6 +889,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderFeatureFlags() {
+        if (state.moduleErrors.control) {
+            featureFlagsTableBody.innerHTML = tableErrorRow(state.moduleErrors.control, 7);
+            saveFeatureBtn.disabled = true;
+            return;
+        }
+        saveFeatureBtn.disabled = false;
         const flags = [...state.featureFlags].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
         if (flags.length === 0) {
             featureFlagsTableBody.innerHTML = '<tr><td colspan="7" class="loading-state">Chưa có feature flag</td></tr>';
@@ -673,13 +903,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         featureFlagsTableBody.innerHTML = flags.map(flag => `
             <tr>
-                <td class="mono-value">${escapeHTML(flag.feature_key)}</td>
-                <td><strong>${escapeHTML(flag.display_name)}</strong></td>
-                <td class="muted-value">${escapeHTML(flag.description || '')}</td>
-                <td><span class="flag-state ${flag.enabled ? 'is-on' : ''}">${flag.enabled ? 'ON' : 'OFF'}</span></td>
-                <td><span class="flag-state ${flag.locked ? 'is-locked' : ''}">${flag.locked ? 'LOCKED' : 'OPEN'}</span></td>
-                <td>${Number(flag.sort_order) || 0}</td>
-                <td class="actions-cell">
+                <td data-label="Feature key" class="mono-value">${escapeHTML(flag.feature_key)}</td>
+                <td data-label="Tên"><strong>${escapeHTML(flag.display_name)}</strong></td>
+                <td data-label="Mô tả" class="muted-value">${escapeHTML(flag.description || '')}</td>
+                <td data-label="Enabled"><span class="flag-state ${flag.enabled ? 'is-on' : ''}">${flag.enabled ? 'ON' : 'OFF'}</span></td>
+                <td data-label="Locked"><span class="flag-state ${flag.locked ? 'is-locked' : ''}">${flag.locked ? 'LOCKED' : 'OPEN'}</span></td>
+                <td data-label="Thứ tự">${Number(flag.sort_order) || 0}</td>
+                <td data-label="Hành động" class="actions-cell">
                     <button class="btn btn-outline btn-sm action-edit-feature" data-feature="${flag.feature_key}" title="Chỉnh sửa"><i class="fa-solid fa-pen"></i></button>
                     <button class="btn btn-outline btn-sm action-toggle-feature" data-feature="${flag.feature_key}" title="Bật/tắt"><i class="fa-solid fa-power-off"></i></button>
                     <button class="btn btn-danger-outline btn-sm action-delete-feature" data-feature="${flag.feature_key}" title="Xóa"><i class="fa-solid fa-trash-can"></i></button>
@@ -720,7 +950,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         showToast(`Đã xóa ${featureKey}.`, 'success');
                         loadData();
                     } else {
-                        showToast(res.data?.message || 'Không thể xóa flag.', 'error');
+                        showToast(res.message || 'Không thể xóa flag.', 'error');
                     }
                 });
             });
@@ -740,11 +970,15 @@ document.addEventListener('DOMContentLoaded', () => {
             await loadData();
             return true;
         }
-        showToast(res.data?.message || 'Không thể lưu feature flag.', 'error');
+        showToast(res.message || 'Không thể lưu feature flag.', 'error');
         return false;
     }
 
     function renderDevices() {
+        if (state.moduleErrors.devices) {
+            devicesTableBody.innerHTML = tableErrorRow(state.moduleErrors.devices, 8);
+            return;
+        }
         const query = (deviceSearchInput.value || '').trim().toLowerCase();
         const devices = state.devices.filter(device => {
             if (!query) return true;
@@ -764,14 +998,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const banned = device.status === 'banned';
             return `
                 <tr>
-                    <td><span class="mono-value">${escapeHTML(device.hwid)}</span></td>
-                    <td>${escapeHTML(device.app_version || '—')}</td>
-                    <td>${licenses}</td>
-                    <td>${Number(device.active_sessions) || 0}</td>
-                    <td class="muted-value">${formatDateTime(device.last_seen_at)}</td>
-                    <td><span class="status-pill ${banned ? 'status-banned' : 'status-active'}">${banned ? 'Banned' : 'Active'}</span></td>
-                    <td class="muted-value">${escapeHTML(device.ban_reason || '—')}</td>
-                    <td class="actions-cell">
+                    <td data-label="Device ID"><span class="mono-value">${escapeHTML(device.hwid)}</span></td>
+                    <td data-label="Version">${escapeHTML(device.app_version || '—')}</td>
+                    <td data-label="Licenses">${licenses}</td>
+                    <td data-label="Sessions">${Number(device.active_sessions) || 0}</td>
+                    <td data-label="Last seen" class="muted-value">${formatDateTime(device.last_seen_at)}</td>
+                    <td data-label="Trạng thái"><span class="status-pill ${banned ? 'status-banned' : 'status-active'}">${banned ? 'Banned' : 'Active'}</span></td>
+                    <td data-label="Lý do" class="muted-value">${escapeHTML(device.ban_reason || '—')}</td>
+                    <td data-label="Hành động" class="actions-cell">
                         <button class="btn ${banned ? 'btn-warning-outline' : 'btn-danger-outline'} btn-sm action-device-status" data-device-id="${device.id}" data-device-status="${banned ? 'active' : 'banned'}">
                             <i class="fa-solid ${banned ? 'fa-lock-open' : 'fa-ban'}"></i> ${banned ? 'Mở khóa' : 'Khóa'}
                         </button>
@@ -787,11 +1021,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const device = state.devices.find(item => Number(item.id) === deviceId);
                 if (!device) return;
                 const actionText = nextStatus === 'banned' ? 'khóa' : 'mở khóa';
-                confirmAction(`${nextStatus === 'banned' ? 'Khóa' : 'Mở khóa'} thiết bị`, `${actionText} <strong>${escapeHTML(device.hwid)}</strong>?`, async () => {
-                    let reason = '';
-                    if (nextStatus === 'banned') {
-                        reason = window.prompt('Lý do khóa thiết bị:', 'Policy violation') || 'Policy violation';
-                    }
+                confirmAction(`${nextStatus === 'banned' ? 'Khóa' : 'Mở khóa'} thiết bị`, `${actionText} <strong>${escapeHTML(device.hwid)}</strong>?`, async (reason = '') => {
                     const res = await apiRequest('/api/admin/device-status', 'POST', {
                         device_id: deviceId,
                         status: nextStatus,
@@ -801,14 +1031,21 @@ document.addEventListener('DOMContentLoaded', () => {
                         showToast(`Đã ${actionText} thiết bị.`, 'success');
                         loadData();
                     } else {
-                        showToast(res.data?.message || `Không thể ${actionText} thiết bị.`, 'error');
+                        showToast(res.message || `Không thể ${actionText} thiết bị.`, 'error');
                     }
+                }, {
+                    reasonRequired: nextStatus === 'banned',
+                    reasonPlaceholder: 'VD: Vi phạm chính sách sử dụng'
                 });
             });
         });
     }
 
     function renderSessions() {
+        if (state.moduleErrors.sessions) {
+            sessionsTableBody.innerHTML = tableErrorRow(state.moduleErrors.sessions, 8);
+            return;
+        }
         if (state.sessions.length === 0) {
             sessionsTableBody.innerHTML = '<tr><td colspan="8" class="loading-state">Chưa có client session</td></tr>';
             return;
@@ -818,14 +1055,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const statusClass = session.status === 'active' ? 'status-active' : session.status === 'revoked' ? 'status-revoked' : 'status-expired';
             return `
                 <tr>
-                    <td class="mono-value">#${session.id}</td>
-                    <td class="mono-value">${escapeHTML(session.device?.hwid || '—')}</td>
-                    <td>${escapeHTML(session.license?.key_string || '—')}</td>
-                    <td>${escapeHTML(session.device?.app_version || '—')}</td>
-                    <td class="muted-value">${formatDateTime(session.last_seen_at)}</td>
-                    <td class="muted-value">${formatDateTime(session.expires_at)}</td>
-                    <td><span class="status-pill ${statusClass}">${escapeHTML(session.status)}</span></td>
-                    <td class="actions-cell">
+                    <td data-label="Session" class="mono-value">#${session.id}</td>
+                    <td data-label="Device" class="mono-value">${escapeHTML(session.device?.hwid || '—')}</td>
+                    <td data-label="License">${escapeHTML(session.license?.key_string || '—')}</td>
+                    <td data-label="Version">${escapeHTML(session.device?.app_version || '—')}</td>
+                    <td data-label="Last seen" class="muted-value">${formatDateTime(session.last_seen_at)}</td>
+                    <td data-label="Hết hạn">${formatDateTime(session.expires_at)}</td>
+                    <td data-label="Trạng thái"><span class="status-pill ${statusClass}">${escapeHTML(session.status)}</span></td>
+                    <td data-label="Hành động" class="actions-cell">
                         ${session.status === 'active' ? `<button class="btn btn-danger-outline btn-sm action-revoke-session" data-session-id="${session.id}"><i class="fa-solid fa-xmark"></i> Revoke</button>` : '—'}
                     </td>
                 </tr>
@@ -841,7 +1078,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         showToast(`Session #${sessionId} đã bị thu hồi.`, 'success');
                         loadData();
                     } else {
-                        showToast(res.data?.message || 'Không thể thu hồi session.', 'error');
+                        showToast(res.message || 'Không thể thu hồi session.', 'error');
                     }
                 });
             });
@@ -851,6 +1088,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // EVENT LISTENERS
     // ==========================================
+
+    document.querySelectorAll('.dashboard-nav-item').forEach(button => {
+        button.addEventListener('click', () => setActiveView(button.dataset.view));
+    });
+    document.querySelectorAll('.quick-nav').forEach(button => {
+        button.addEventListener('click', () => setActiveView(button.dataset.targetView));
+    });
 
     [menuEnabledInput, maintenanceModeInput, autoUpdateEnabledInput, minimumVersionInput,
         latestVersionInput, updateUrlInput, heartbeatIntervalInput, announcementInput]
@@ -886,7 +1130,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderControlPlane();
             showToast('Remote policy đã được cập nhật.', 'success');
         } else {
-            showToast(res.data?.message || 'Không thể lưu remote policy.', 'error');
+            showToast(res.message || 'Không thể lưu remote policy.', 'error');
         }
     });
 
@@ -938,28 +1182,37 @@ document.addEventListener('DOMContentLoaded', () => {
         loginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Đang kiểm tra...</span>';
 
         let loginData = null;
+        let loginError = '';
         try {
             const response = await fetch('/api/admin/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password: pwd })
             });
-            loginData = await response.json();
+            const raw = await response.text();
+            loginData = raw ? JSON.parse(raw) : null;
+            if (!response.ok) loginError = loginData?.message || `Đăng nhập thất bại (HTTP ${response.status}).`;
         } catch (error) {
             console.error('Admin login failed:', error);
+            loginError = 'Không thể kết nối đến API đăng nhập.';
         }
 
         if (loginData?.success && loginData.token) {
             state.adminToken = loginData.token;
             localStorage.setItem('admin_token', loginData.token);
-            await loadData();
+            const result = await loadData();
             showDashboard();
-            updateApiStatus(true);
             startAutoRefresh();
-            showToast('Đăng nhập thành công!', 'success');
+            if (!result.success) {
+                showToast(result.message || 'Đã đăng nhập nhưng không tải được dữ liệu dashboard.', 'error');
+            } else if (result.partial) {
+                showToast(`Đăng nhập thành công; chưa tải được: ${result.failedModules.join(', ')}.`, 'warning');
+            } else {
+                showToast('Đăng nhập và đồng bộ dữ liệu thành công.', 'success');
+            }
         } else {
             clearSession();
-            showToast('Mật khẩu không đúng hoặc lỗi kết nối API.', 'error');
+            showToast(loginError || loginData?.message || 'Đăng nhập không thành công.', 'error');
             showLogin();
         }
 
@@ -977,11 +1230,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Manual refresh
     refreshBtn.addEventListener('click', async () => {
         refreshBtn.querySelector('i').classList.add('spin-animation');
-        await loadData();
-        showToast('Dữ liệu đã được cập nhật.', 'success');
-        setTimeout(() => {
-            refreshBtn.querySelector('i').classList.remove('spin-animation');
-        }, 800);
+        refreshBtn.disabled = true;
+        const result = await loadData();
+        refreshBtn.disabled = false;
+        refreshBtn.querySelector('i').classList.remove('spin-animation');
+        if (result.unauthorized) {
+            clearSession();
+            showLogin();
+            showToast('Phiên quản trị đã hết hạn hoặc không hợp lệ.', 'error');
+        } else if (!result.success) {
+            showToast(result.message || 'Không thể làm mới dashboard.', 'error');
+        } else if (result.partial) {
+            showToast(`Đã làm mới một phần; lỗi: ${result.failedModules.join(', ')}.`, 'warning');
+        } else {
+            showToast('Tất cả module đã được đồng bộ.', 'success');
+        }
     });
 
     // Token select change
@@ -1018,7 +1281,7 @@ document.addEventListener('DOMContentLoaded', () => {
     createTokenBtn.addEventListener('click', async () => {
         const tokenName = tokenNameInput.value.trim();
         if (!tokenName) {
-            showToast('Vui lòng nhập tên Token.', 'error');
+            showToast('Vui lòng nhập tên sản phẩm.', 'error');
             tokenNameInput.focus();
             return;
         }
@@ -1041,17 +1304,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await apiRequest('/api/admin/create-token', 'POST', body);
 
         createTokenBtn.disabled = false;
-        createTokenBtn.innerHTML = '<i class="fa-solid fa-plus"></i> <span class="btn-text">Tạo Token</span>';
+        createTokenBtn.innerHTML = '<i class="fa-solid fa-plus"></i> <span class="btn-text">Tạo sản phẩm</span>';
 
         if (res.success && res.data.token) {
-            showToast(`Tạo Token "${tokenName}" thành công!`, 'success');
+            showToast(`Đã tạo sản phẩm "${tokenName}".`, 'success');
             tokenNameInput.value = '';
             tokenMaxDaysInput.value = '';
             tokenDisplayTextInput.value = '';
             tokenDescInput.value = '';
             loadData();
         } else {
-            showToast(`Lỗi tạo Token: ${res.data?.message || 'Unknown'}`, 'error');
+            showToast(res.message || 'Không thể tạo package.', 'error');
         }
     });
 
@@ -1059,7 +1322,7 @@ document.addEventListener('DOMContentLoaded', () => {
     createKeyBtn.addEventListener('click', async () => {
         // Validate token selection
         if (!state.selectedTokenId) {
-            showToast('Vui lòng chọn Token Package trước khi tạo key.', 'error');
+            showToast('Vui lòng chọn sản phẩm trước khi phát hành license.', 'error');
             tokenSelect.focus();
             return;
         }
@@ -1078,7 +1341,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Validate duration against token max_days
         if (!validateDurationAgainstToken()) {
-            showToast('Thời hạn vượt quá giới hạn của Token đã chọn.', 'error');
+            showToast('Thời hạn vượt quá giới hạn của sản phẩm đã chọn.', 'error');
             return;
         }
 
@@ -1095,7 +1358,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         createKeyBtn.disabled = false;
-        createKeyBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> <span class="btn-text">Tạo Key Ngay</span>';
+        createKeyBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> <span class="btn-text">Phát hành License</span>';
 
         if (res.success && res.data.keys) {
             const keys = res.data.keys;
@@ -1104,10 +1367,10 @@ document.addEventListener('DOMContentLoaded', () => {
             countInput.value = '1';
             maxDevicesInput.value = '1';
             customKeyInput.value = '';
-            showToast(`Tạo ${keys.length} Key thành công!`, 'success');
+            showToast(`Đã phát hành ${keys.length} license.`, 'success');
             loadData();
         } else {
-            showToast(`Lỗi tạo key: ${res.data?.message || 'Unknown'}`, 'error');
+            showToast(res.message || 'Không thể tạo license.', 'error');
         }
     });
 
@@ -1158,7 +1421,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const origHTML = copyAllBtn.innerHTML;
             copyAllBtn.innerHTML = '<i class="fa-solid fa-check"></i> <span>Copied!</span>';
             copyAllBtn.classList.add('btn-success');
-            showToast('Đã copy tất cả Keys!', 'success');
+            showToast('Đã sao chép tất cả licenses.', 'success');
             setTimeout(() => {
                 copyAllBtn.innerHTML = origHTML;
                 copyAllBtn.classList.remove('btn-success');
@@ -1191,7 +1454,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('Đã xóa toàn bộ log gian lận.', 'success');
                 loadData();
             } else {
-                showToast(`Lỗi: ${res.data?.message || 'Unknown error'}`, 'error');
+                showToast(res.message || 'Không thể xóa security logs.', 'error');
             }
         });
     });
@@ -1207,38 +1470,55 @@ document.addEventListener('DOMContentLoaded', () => {
         const icons = {
             success: 'fa-circle-check',
             error: 'fa-triangle-exclamation',
+            warning: 'fa-circle-exclamation',
             info: 'fa-info-circle'
         };
 
-        toast.innerHTML = `
-            <i class="fa-solid ${icons[type] || icons.info}"></i>
-            <span class="toast-message">${message}</span>
-        `;
+        toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+        const icon = document.createElement('i');
+        icon.className = `fa-solid ${icons[type] || icons.info}`;
+        const text = document.createElement('span');
+        text.className = 'toast-message';
+        text.textContent = String(message || 'Không có nội dung phản hồi.');
+        toast.append(icon, text);
         container.appendChild(toast);
         requestAnimationFrame(() => toast.classList.add('show'));
 
         setTimeout(() => {
             toast.classList.remove('show');
             setTimeout(() => toast.remove(), 400);
-        }, 3500);
+        }, type === 'error' ? 5500 : 4000);
     }
 
-    function confirmAction(title, message, callback) {
+    function confirmAction(title, message, callback, options = {}) {
         modalTitle.innerText = title;
         modalMessage.innerHTML = message;
+        currentModalOptions = options;
+        modalReasonInput.value = '';
+        modalReasonInput.placeholder = options.reasonPlaceholder || 'Nhập lý do';
+        modalReasonGroup.classList.toggle('hidden', !options.reasonRequired);
         confirmModal.classList.remove('hidden');
         state.currentModalAction = callback;
+        if (options.reasonRequired) setTimeout(() => modalReasonInput.focus(), 80);
     }
 
     modalBtnCancel.addEventListener('click', () => {
         confirmModal.classList.add('hidden');
         state.currentModalAction = null;
+        currentModalOptions = {};
     });
 
     modalBtnConfirm.addEventListener('click', () => {
+        const reason = modalReasonInput.value.trim();
+        if (currentModalOptions.reasonRequired && !reason) {
+            showToast('Vui lòng nhập lý do trước khi xác nhận.', 'warning');
+            modalReasonInput.focus();
+            return;
+        }
         confirmModal.classList.add('hidden');
-        if (state.currentModalAction) state.currentModalAction();
+        if (state.currentModalAction) state.currentModalAction(reason);
         state.currentModalAction = null;
+        currentModalOptions = {};
     });
 
     // Close modal on backdrop click
@@ -1246,6 +1526,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target === confirmModal) {
             confirmModal.classList.add('hidden');
             state.currentModalAction = null;
+            currentModalOptions = {};
         }
     });
 
@@ -1254,6 +1535,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Escape' && !confirmModal.classList.contains('hidden')) {
             confirmModal.classList.add('hidden');
             state.currentModalAction = null;
+            currentModalOptions = {};
         }
     });
 
@@ -1270,4 +1552,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Launch
     init();
-});
+}, { once: true });

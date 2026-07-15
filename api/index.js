@@ -6,6 +6,7 @@ const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const app = express();
+app.disable('x-powered-by');
 
 // Native clients do not rely on browser CORS. The dashboard is same-origin in
 // production; optional extra origins can be provided as a comma-separated env.
@@ -22,6 +23,11 @@ app.use(cors({
   }
 }));
 app.use(express.json());
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store, max-age=0');
+  res.set('Pragma', 'no-cache');
+  next();
+});
 
 // Initialize Supabase Client
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -216,7 +222,7 @@ app.get('/api/health', async (req, res) => {
       status: 'degraded',
       database_configured: false,
       schema_ready: false,
-      version: '4.0.0',
+      version: '4.1.0',
       message: 'Database environment variables are missing.',
       timestamp: new Date().toISOString()
     });
@@ -232,7 +238,7 @@ app.get('/api/health', async (req, res) => {
     status: schemaReady ? 'ok' : 'migration_required',
     database_configured: true,
     schema_ready: schemaReady,
-    version: '4.0.0',
+    version: '4.1.0',
     message: schemaReady ? 'ServerKey control plane is operational.' : 'Run supabase.sql to install the v4 database schema.',
     timestamp: new Date().toISOString()
   });
@@ -273,8 +279,15 @@ app.use(['/api/admin', '/api/client', '/api/v1/client'], (req, res, next) => {
 app.post('/api/admin/create-token', verifyAdmin, async (req, res) => {
   const { token_name, max_days, description, display_text } = req.body;
 
-  if (!token_name || !token_name.trim()) {
+  const tokenName = sanitizeString(token_name, 100);
+  const parsedMaxDays = max_days === undefined || max_days === null || max_days === ''
+    ? null
+    : Number.parseInt(max_days, 10);
+  if (!tokenName) {
     return res.status(400).json({ success: false, message: "token_name is required." });
+  }
+  if (parsedMaxDays !== null && (!Number.isInteger(parsedMaxDays) || parsedMaxDays < 1 || parsedMaxDays > 3650)) {
+    return res.status(400).json({ success: false, message: 'max_days must be between 1 and 3650.' });
   }
 
   const token_string = `TKN_${randomAlphaNum(12)}`;
@@ -283,11 +296,11 @@ app.post('/api/admin/create-token', verifyAdmin, async (req, res) => {
     const { data, error } = await supabase
       .from('tokens')
       .insert([{
-        token_name: token_name.trim(),
+        token_name: tokenName,
         token_string,
-        max_days: max_days !== undefined && max_days !== null ? parseInt(max_days) : null,
-        description: description || null,
-        display_text: display_text && display_text.trim() ? display_text.trim() : "ServerKey by #wtuananh6868"
+        max_days: parsedMaxDays,
+        description: sanitizeString(description, 300) || null,
+        display_text: sanitizeString(display_text, 160) || "ServerKey by #wtuananh6868"
       }])
       .select()
       .single();
@@ -366,8 +379,14 @@ app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
   const parsedCount = Math.min(Math.max(parseInt(count) || 1, 1), 50);
   const parsedMaxDevices = parseInt(max_devices) || 1;
 
-  if (parsedMaxDevices < 1) {
-    return res.status(400).json({ success: false, message: "max_devices must be >= 1." });
+  if (parsedMaxDevices < 1 || parsedMaxDevices > 100) {
+    return res.status(400).json({ success: false, message: "max_devices must be between 1 and 100." });
+  }
+
+  const customKey = sanitizeString(custom_key_string, 120);
+  const safeNote = sanitizeString(note, 500) || null;
+  if (customKey && !/^[A-Za-z0-9._-]+$/.test(customKey)) {
+    return res.status(400).json({ success: false, message: 'custom_key_string may only contain letters, numbers, dot, underscore, and dash.' });
   }
 
   try {
@@ -402,9 +421,8 @@ app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
     const keysToInsert = [];
     for (let i = 0; i < parsedCount; i++) {
       let key_string;
-      if (custom_key_string && custom_key_string.trim()) {
-        const trimmedCustom = custom_key_string.trim();
-        key_string = parsedCount === 1 ? trimmedCustom : `${trimmedCustom}-${i + 1}`;
+      if (customKey) {
+        key_string = parsedCount === 1 ? customKey : `${customKey}-${i + 1}`;
       } else {
         const randomPart = randomAlphaNum(8);
         if (parsedDuration === -1) {
@@ -421,7 +439,7 @@ app.post('/api/admin/create-key', verifyAdmin, async (req, res) => {
         max_devices: parsedMaxDevices,
         status: 'unactivated',
         expires_at: null,
-        note: note || null
+        note: safeNote
       });
     }
 
@@ -483,6 +501,13 @@ app.post('/api/admin/reset-hwid', verifyAdmin, async (req, res) => {
 
     if (updateError) throw updateError;
 
+    const { error: revokeError } = await supabase
+      .from('client_sessions')
+      .update({ status: 'revoked' })
+      .eq('key_id', keyData.id)
+      .eq('status', 'active');
+    if (revokeError) throw revokeError;
+
     return res.json({ success: true, message: "All devices reset successfully." });
   } catch (error) {
     console.error("Error resetting HWID:", error);
@@ -526,6 +551,10 @@ app.post('/api/admin/ban-key', verifyAdmin, async (req, res) => {
     return res.status(400).json({ success: false, message: "key_string is required." });
   }
 
+  if (!['ban', 'unban'].includes(action)) {
+    return res.status(400).json({ success: false, message: "action must be 'ban' or 'unban'." });
+  }
+
   const newStatus = action === 'unban' ? 'unactivated' : 'banned';
 
   try {
@@ -535,17 +564,19 @@ app.post('/api/admin/ban-key', verifyAdmin, async (req, res) => {
       updateData.expires_at = null;
 
       // Also clear devices when unbanning
-      const { data: keyData } = await supabase
+      const { data: keyData, error: keyLookupError } = await supabase
         .from('keys_management')
         .select('id')
         .eq('key_string', key_string)
         .maybeSingle();
+      if (keyLookupError) throw keyLookupError;
 
       if (keyData) {
-        await supabase
+        const { error: clearDevicesError } = await supabase
           .from('key_devices')
           .delete()
           .eq('key_id', keyData.id);
+        if (clearDevicesError) throw clearDevicesError;
       }
     }
 
@@ -559,6 +590,15 @@ app.post('/api/admin/ban-key', verifyAdmin, async (req, res) => {
 
     if (!data || data.length === 0) {
       return res.status(404).json({ success: false, message: "Key not found." });
+    }
+
+    if (action === 'ban') {
+      const { error: revokeError } = await supabase
+        .from('client_sessions')
+        .update({ status: 'revoked' })
+        .eq('key_id', data[0].id)
+        .eq('status', 'active');
+      if (revokeError) throw revokeError;
     }
 
     return res.json({ success: true, message: `Key ${newStatus === 'banned' ? 'banned' : 'unbanned'} successfully.` });
@@ -625,7 +665,8 @@ app.get('/api/admin/get-fraud', verifyAdmin, async (req, res) => {
     const { data, error } = await supabase
       .from('fraud_logs')
       .select('*')
-      .order('logged_at', { ascending: false });
+      .order('logged_at', { ascending: false })
+      .limit(500);
 
     if (error) throw error;
 

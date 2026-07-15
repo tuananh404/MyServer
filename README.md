@@ -1,4 +1,4 @@
-# ServerKey Control Plane v4
+# ServerKey Control Plane v4.1
 
 Web dashboard and API for license activation, device management, live client
 sessions, remote menu configuration, feature flags, and update policy.
@@ -14,6 +14,10 @@ sessions, remote menu configuration, feature flags, and update policy.
 - Dynamic feature flags for IMGUI menu groups
 - Fraud/security event log
 - Vercel-compatible Express API and static dashboard
+- Responsive business console with real per-module health/error states
+
+The reusable IMGUI and multi-project architecture is documented in
+[`docs/IMGUI_INTEGRATION_PLAN.md`](./docs/IMGUI_INTEGRATION_PLAN.md).
 
 ## Database migration
 
@@ -62,6 +66,13 @@ Health check:
 
 ```bash
 curl http://localhost:3000/api/health
+```
+
+Quality checks:
+
+```bash
+npm run check
+npm test
 ```
 
 ## Client activation
@@ -179,7 +190,7 @@ Existing token, key, stats, and fraud-log admin routes remain compatible.
 2. Push this repository to GitHub.
 3. Import the repository into Vercel.
 4. Add the environment variables listed above.
-5. Deploy and verify `/api/health` reports `status: ok` and version `4.0.0`.
+5. Deploy and verify `/api/health` reports `status: ok` and version `4.1.0`.
 
 The GitHub/Vercel integration will redeploy automatically after later pushes to
 the configured production branch.

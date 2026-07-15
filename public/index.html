@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Owner Dashboard — License Key Management</title>
-    <meta name="description" content="Secure administration dashboard for key authorization, device verification, and fraud detection.">
+    <title>ServerKey Cloud — Business Control Center</title>
+    <meta name="description" content="Business control center for licenses, devices, client sessions, remote policies, and security events.">
     <meta name="robots" content="noindex, nofollow">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -33,11 +33,14 @@
         <!-- LOGIN OVERLAY -->
         <div id="login-container" class="glass-card fade-in">
             <div class="card-header text-center">
-                <div class="logo-icon">
-                    <i class="fa-solid fa-shield-halved fa-2x"></i>
+                <div class="login-brand-lockup">
+                    <div class="logo-icon">
+                        <i class="fa-solid fa-crown"></i>
+                    </div>
+                    <span class="login-edition">OWNER CONSOLE</span>
                 </div>
-                <h1 class="login-title">Admin Dashboard</h1>
-                <p class="login-subtitle">Nhập mật khẩu quản trị để tiếp tục</p>
+                <h1 class="login-title">ServerKey Cloud</h1>
+                <p class="login-subtitle">Business control center dành riêng cho chủ hệ thống</p>
             </div>
             <form id="login-form">
                 <div class="form-group">
@@ -56,7 +59,7 @@
                 </button>
             </form>
             <div class="login-footer">
-                <i class="fa-solid fa-lock"></i> Kết nối được mã hóa end-to-end
+                <i class="fa-solid fa-shield-halved"></i> Phiên đăng nhập ký số · Tự hết hạn sau 12 giờ
             </div>
         </div>
 
@@ -65,33 +68,93 @@
             <!-- NAVBAR -->
             <header class="navbar glass-card">
                 <div class="brand">
-                    <i class="fa-solid fa-crown brand-icon"></i>
-                    <span>ADMIN PANEL</span>
+                    <span class="brand-mark"><i class="fa-solid fa-crown brand-icon"></i></span>
+                    <span class="brand-copy">
+                        <strong>ServerKey Cloud</strong>
+                        <small>Business Control Center</small>
+                    </span>
                 </div>
                 <div class="navbar-actions">
-                    <div class="status-indicator" id="status-indicator">
+                    <div class="status-indicator status-loading" id="status-indicator" title="Trạng thái API và database">
                         <span class="pulse-dot"></span>
-                        <span id="api-status-text">Connected</span>
+                        <span id="api-status-text">Đang kiểm tra</span>
                     </div>
-                    <button id="refresh-btn" class="btn btn-outline btn-sm" title="Tải lại dữ liệu">
+                    <button id="refresh-btn" class="btn btn-icon btn-outline" title="Tải lại dữ liệu" aria-label="Tải lại dữ liệu">
                         <i class="fa-solid fa-arrows-rotate"></i>
                     </button>
-                    <button id="logout-btn" class="btn btn-danger-outline btn-sm">
+                    <button id="logout-btn" class="btn btn-quiet">
                         <i class="fa-solid fa-sign-out"></i>
                         <span>Đăng xuất</span>
                     </button>
                 </div>
             </header>
 
+            <div id="system-banner" class="system-banner hidden" role="status">
+                <i id="system-banner-icon" class="fa-solid fa-circle-info"></i>
+                <div>
+                    <strong id="system-banner-title">Đang kiểm tra hệ thống</strong>
+                    <p id="system-banner-message">Vui lòng chờ phản hồi thực tế từ API.</p>
+                </div>
+            </div>
+
+            <nav class="dashboard-nav glass-card" aria-label="Dashboard sections">
+                <button class="dashboard-nav-item active" data-view="overview">
+                    <i class="fa-solid fa-table-cells-large"></i><span>Tổng quan</span>
+                </button>
+                <button class="dashboard-nav-item" data-view="licenses">
+                    <i class="fa-solid fa-key"></i><span>Licenses</span>
+                    <small id="nav-license-count">0</small>
+                </button>
+                <button class="dashboard-nav-item" data-view="devices">
+                    <i class="fa-solid fa-mobile-screen-button"></i><span>Thiết bị</span>
+                    <small id="nav-device-count">0</small>
+                </button>
+                <button class="dashboard-nav-item" data-view="features">
+                    <i class="fa-solid fa-sliders"></i><span>Menu Control</span>
+                </button>
+                <button class="dashboard-nav-item" data-view="security">
+                    <i class="fa-solid fa-shield-halved"></i><span>Bảo mật</span>
+                    <small id="nav-alert-count">0</small>
+                </button>
+            </nav>
+
+            <section class="page-heading" aria-live="polite">
+                <div>
+                    <span class="page-eyebrow">SERVERKEY OPERATIONS</span>
+                    <h1 id="current-view-title">Tổng quan hệ thống</h1>
+                    <p id="current-view-description">Trạng thái vận hành và chính sách client theo thời gian thực.</p>
+                </div>
+                <div class="page-heading-meta">
+                    <span><i class="fa-solid fa-calendar-day"></i><span id="current-date-label">—</span></span>
+                    <span class="production-chip"><i class="fa-solid fa-circle"></i> Production</span>
+                </div>
+            </section>
+
+            <section class="overview-hero glass-card" data-view-section="overview">
+                <div class="overview-copy">
+                    <span class="overview-kicker"><i class="fa-solid fa-wand-magic-sparkles"></i> OWNER COMMAND CENTER</span>
+                    <h2 id="overview-status-title">Đang đồng bộ dữ liệu thật…</h2>
+                    <p id="overview-status-copy">Dashboard chỉ hiển thị trạng thái sau khi API phản hồi.</p>
+                    <div class="overview-actions">
+                        <button class="btn btn-primary quick-nav" data-target-view="licenses"><i class="fa-solid fa-plus"></i> Tạo license</button>
+                        <button class="btn btn-outline quick-nav" data-target-view="devices"><i class="fa-solid fa-mobile-screen"></i> Quản lý thiết bị</button>
+                    </div>
+                </div>
+                <div class="overview-signal">
+                    <div class="signal-ring"><i class="fa-solid fa-cloud"></i></div>
+                    <span id="overview-revision">Config revision —</span>
+                </div>
+            </section>
+
             <!-- STATS CARDS ROW -->
-            <div class="stats-grid">
+            <div class="stats-grid" data-view-section="overview">
                 <div class="stat-card glass-card" id="stat-total">
                     <div class="stat-icon stat-icon-total">
                         <i class="fa-solid fa-key"></i>
                     </div>
                     <div class="stat-info">
                         <span class="stat-number" data-stat="total">0</span>
-                        <span class="stat-label">Tổng Keys</span>
+                        <span class="stat-label">Tổng licenses</span>
                     </div>
                 </div>
                 <div class="stat-card glass-card" id="stat-active">
@@ -118,7 +181,7 @@
                     </div>
                     <div class="stat-info">
                         <span class="stat-number" data-stat="fraudAlerts">0</span>
-                        <span class="stat-label">Cảnh báo gian lận</span>
+                        <span class="stat-label">Cảnh báo bảo mật</span>
                     </div>
                 </div>
                 <div class="stat-card glass-card" id="stat-tokens">
@@ -127,7 +190,7 @@
                     </div>
                     <div class="stat-info">
                         <span class="stat-number" data-stat="totalTokens">0</span>
-                        <span class="stat-label">Token Packages</span>
+                        <span class="stat-label">Sản phẩm</span>
                     </div>
                 </div>
                 <div class="stat-card glass-card" id="stat-devices">
@@ -154,7 +217,7 @@
             <main class="dashboard-grid">
 
                 <!-- REMOTE CLIENT CONTROL -->
-                <section class="glass-card grid-col-full card-fade-up control-plane-card">
+                <section class="glass-card grid-col-full card-fade-up control-plane-card" data-view-section="overview">
                     <div class="card-header table-card-header">
                         <div>
                             <h2><i class="fa-solid fa-tower-broadcast text-gradient"></i> Remote Client Control</h2>
@@ -222,7 +285,7 @@
                 </section>
 
                 <!-- FEATURE FLAGS -->
-                <section class="glass-card grid-col-full card-fade-up">
+                <section class="glass-card grid-col-full card-fade-up" data-view-section="features">
                     <div class="card-header">
                         <h2><i class="fa-solid fa-sliders text-gradient"></i> Menu & Feature Flags</h2>
                         <p>Client tự bỏ qua các key chưa hỗ trợ, nên có thể thêm flag mới an toàn</p>
@@ -253,7 +316,7 @@
                     </form>
 
                     <div class="table-responsive">
-                        <table>
+                        <table class="responsive-cards feature-table">
                             <thead>
                                 <tr>
                                     <th>Feature Key</th>
@@ -273,7 +336,7 @@
                 </section>
 
                 <!-- DEVICE REGISTRY -->
-                <section class="glass-card grid-col-full card-fade-up">
+                <section class="glass-card grid-col-full card-fade-up" data-view-section="devices">
                     <div class="card-header table-card-header">
                         <div>
                             <h2><i class="fa-solid fa-mobile-screen-button text-gradient"></i> Device Registry</h2>
@@ -282,7 +345,7 @@
                         <input type="search" id="device-search-input" class="compact-search" placeholder="Tìm Device ID hoặc Key...">
                     </div>
                     <div class="table-responsive">
-                        <table>
+                        <table class="responsive-cards device-table">
                             <thead>
                                 <tr>
                                     <th>Device ID</th>
@@ -303,13 +366,13 @@
                 </section>
 
                 <!-- LIVE CLIENT SESSIONS -->
-                <section class="glass-card grid-col-full card-fade-up">
+                <section class="glass-card grid-col-full card-fade-up" data-view-section="security">
                     <div class="card-header">
                         <h2><i class="fa-solid fa-satellite-dish text-gradient"></i> Client Sessions</h2>
                         <p>Heartbeat gần nhất và quyền truy cập hiện tại</p>
                     </div>
                     <div class="table-responsive">
-                        <table>
+                        <table class="responsive-cards session-table">
                             <thead>
                                 <tr>
                                     <th>Session</th>
@@ -330,16 +393,16 @@
                 </section>
 
                 <!-- TOKEN MANAGEMENT CARD -->
-                <section class="glass-card grid-col-full card-fade-up" id="token-management-card">
+                <section class="glass-card grid-col-full card-fade-up" id="token-management-card" data-view-section="licenses">
                     <div class="card-header">
-                        <h2><i class="fa-solid fa-cube text-gradient"></i> Quản Lý Token</h2>
-                        <p>Tạo gói Token trước khi tạo Key</p>
+                        <h2><i class="fa-solid fa-cube text-gradient"></i> Sản phẩm & Package</h2>
+                        <p>Quản lý từng dòng sản phẩm trước khi phát hành license</p>
                     </div>
 
                     <form id="token-form" class="token-form-grid">
                         <div class="form-group">
-                            <label for="token-name-input">Token Name</label>
-                            <input type="text" id="token-name-input" placeholder="VD: VIP Package" required style="padding-left:14px;">
+                            <label for="token-name-input">Tên sản phẩm</label>
+                            <input type="text" id="token-name-input" placeholder="VD: VIP Business" required style="padding-left:14px;">
                         </div>
                         <div class="form-group">
                             <label for="token-max-days-input">Max Days</label>
@@ -356,15 +419,15 @@
                     </form>
                     <button id="create-token-btn" class="btn btn-primary btn-glow" style="margin-bottom: 20px;">
                         <i class="fa-solid fa-plus"></i>
-                        <span class="btn-text">Tạo Token</span>
+                        <span class="btn-text">Tạo sản phẩm</span>
                     </button>
 
                     <div class="table-responsive">
-                        <table id="tokens-table">
+                        <table id="tokens-table" class="responsive-cards token-table">
                             <thead>
                                 <tr>
-                                    <th>Token Name</th>
-                                    <th>Token String</th>
+                                    <th>Sản phẩm</th>
+                                    <th>Product Token</th>
                                     <th>Max Days</th>
                                     <th>Display Text</th>
                                     <th>Mô tả</th>
@@ -383,18 +446,18 @@
                 </section>
                 
                 <!-- KEY GENERATION CARD -->
-                <section class="glass-card grid-col-main card-fade-up">
+                <section class="glass-card grid-col-main card-fade-up" data-view-section="licenses">
                     <div class="card-header">
-                        <h2><i class="fa-solid fa-wand-magic-sparkles text-gradient"></i> Tạo Key Mới</h2>
-                        <p>Tạo Key/Token ngẫu nhiên cho người dùng</p>
+                        <h2><i class="fa-solid fa-wand-magic-sparkles text-gradient"></i> Phát hành License</h2>
+                        <p>Tạo quyền truy cập mới cho khách hàng</p>
                     </div>
                     
                     <div class="generator-body">
                         <!-- Token Selector -->
                         <div class="form-group">
-                            <label for="token-select">Chọn Token Package</label>
+                            <label for="token-select">Chọn sản phẩm</label>
                             <select id="token-select" class="select-input">
-                                <option value="" disabled selected>-- Chọn Token --</option>
+                                <option value="" disabled selected>-- Chọn sản phẩm --</option>
                             </select>
                             <small id="token-warning" class="token-warning hidden"></small>
                         </div>
@@ -438,7 +501,7 @@
 
                         <button id="create-key-btn" class="btn btn-primary btn-glow">
                             <i class="fa-solid fa-bolt"></i>
-                            <span class="btn-text">Tạo Key Ngay</span>
+                            <span class="btn-text">Phát hành License</span>
                         </button>
                     </div>
 
@@ -446,7 +509,7 @@
                     <div id="generated-key-box" class="generated-key-box hidden">
                         <div class="key-box-inner">
                             <div class="key-box-header">
-                                <span class="label"><i class="fa-solid fa-circle-check"></i> Key được tạo thành công</span>
+                                <span class="label"><i class="fa-solid fa-circle-check"></i> License đã phát hành</span>
                                 <button id="copy-all-btn" class="btn btn-copy" title="Copy all keys">
                                     <i class="fa-regular fa-copy"></i>
                                     <span>Copy All</span>
@@ -460,7 +523,7 @@
                 </section>
 
                 <!-- FRAUD ALERT & LOGS CARD -->
-                <section id="fraud-card" class="glass-card grid-col-side card-fade-up">
+                <section id="fraud-card" class="glass-card grid-col-side card-fade-up" data-view-section="security">
                     <div class="card-header alert-header">
                         <div class="fraud-header-row">
                             <h2><i class="fa-solid fa-shield-exclamation text-alert"></i> Cảnh Báo Gian Lận</h2>
@@ -482,24 +545,24 @@
                 </section>
 
                 <!-- KEY MANAGEMENT TABLE CARD -->
-                <section class="glass-card grid-col-full card-fade-up">
+                <section class="glass-card grid-col-full card-fade-up" data-view-section="licenses">
                     <div class="card-header table-card-header">
                         <div>
-                            <h2><i class="fa-solid fa-table-list text-gradient"></i> Danh Sách Keys</h2>
-                            <p>Quản lý toàn bộ keys đã được tạo</p>
+                            <h2><i class="fa-solid fa-table-list text-gradient"></i> Danh sách Licenses</h2>
+                            <p>Quản lý toàn bộ quyền truy cập đã phát hành</p>
                         </div>
                         <div class="table-search-box">
                             <i class="fa-solid fa-magnifying-glass search-icon"></i>
-                            <input type="text" id="search-key-input" placeholder="Tìm kiếm Key hoặc Ghi chú...">
+                            <input type="text" id="search-key-input" placeholder="Tìm license, sản phẩm hoặc ghi chú...">
                         </div>
                     </div>
 
                     <div class="table-responsive">
-                        <table id="keys-table">
+                        <table id="keys-table" class="responsive-cards key-table">
                             <thead>
                                 <tr>
-                                    <th>Key/Token</th>
-                                    <th>Token</th>
+                                    <th>License</th>
+                                    <th>Sản phẩm</th>
                                     <th>Thời hạn</th>
                                     <th>Ngày hết hạn</th>
                                     <th>Thiết bị</th>
@@ -523,8 +586,8 @@
 
             <!-- FOOTER -->
             <footer class="dashboard-footer">
-                <span>© 2026 Admin Panel — Key Management System</span>
-                <span class="footer-version">v4.0</span>
+                <span>© 2026 ServerKey Cloud · Owner Business Console</span>
+                <span class="footer-version">Control Plane v4.1</span>
             </footer>
         </div>
 
@@ -538,6 +601,10 @@
             </div>
             <h3 id="modal-title">Xác nhận</h3>
             <p id="modal-message">Bạn có chắc chắn muốn thực hiện hành động này?</p>
+            <div id="modal-reason-group" class="modal-reason-group hidden">
+                <label for="modal-reason-input">Lý do</label>
+                <input type="text" id="modal-reason-input" maxlength="300" placeholder="Nhập lý do để lưu vào audit log">
+            </div>
             <div class="modal-buttons">
                 <button id="modal-btn-cancel" class="btn btn-outline">Hủy</button>
                 <button id="modal-btn-confirm" class="btn btn-danger">Xác nhận</button>
