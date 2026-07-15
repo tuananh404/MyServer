@@ -102,6 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const announcementInput = document.getElementById('announcement-input');
     const configRevision = document.getElementById('config-revision');
     const saveControlBtn = document.getElementById('save-control-btn');
+    const sendNotificationBtn = document.getElementById('send-notification-btn');
     const controlSaveStatus = document.getElementById('control-save-status');
 
     // Feature, device and session elements
@@ -1102,16 +1103,25 @@ document.addEventListener('DOMContentLoaded', () => {
             controlSaveStatus.textContent = 'Có thay đổi chưa lưu';
         }));
 
-    saveControlBtn.addEventListener('click', async () => {
+    async function persistControlPolicy(asNotification) {
         const heartbeat = Number.parseInt(heartbeatIntervalInput.value, 10);
         if (!Number.isInteger(heartbeat) || heartbeat < 15 || heartbeat > 3600) {
             showToast('Heartbeat phải nằm trong khoảng 15–3600 giây.', 'error');
             heartbeatIntervalInput.focus();
             return;
         }
+        if (asNotification && !announcementInput.value.trim()) {
+            showToast('Hãy nhập nội dung thông báo trước khi gửi.', 'error');
+            announcementInput.focus();
+            return;
+        }
 
         saveControlBtn.disabled = true;
+        sendNotificationBtn.disabled = true;
         saveControlBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
+        if (asNotification) {
+            sendNotificationBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...';
+        }
         const res = await apiRequest('/api/admin/control-config', 'PATCH', {
             menu_enabled: menuEnabledInput.checked,
             maintenance_mode: maintenanceModeInput.checked,
@@ -1123,16 +1133,25 @@ document.addEventListener('DOMContentLoaded', () => {
             announcement: announcementInput.value.trim()
         });
         saveControlBtn.disabled = false;
+        sendNotificationBtn.disabled = false;
         saveControlBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i><span>Lưu Remote Policy</span>';
+        sendNotificationBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i><span>Gửi thông báo</span>';
 
         if (res.success) {
             state.controlConfig = res.data.config;
             renderControlPlane();
-            showToast('Remote policy đã được cập nhật.', 'success');
+            showToast(asNotification
+                ? 'Thông báo đã được gửi tới các client đang online.'
+                : 'Remote policy đã được cập nhật.', 'success');
         } else {
-            showToast(res.message || 'Không thể lưu remote policy.', 'error');
+            showToast(res.message || (asNotification
+                ? 'Không thể gửi thông báo.'
+                : 'Không thể lưu remote policy.'), 'error');
         }
-    });
+    }
+
+    saveControlBtn.addEventListener('click', () => persistControlPolicy(false));
+    sendNotificationBtn.addEventListener('click', () => persistControlPolicy(true));
 
     featureFlagForm.addEventListener('submit', async (event) => {
         event.preventDefault();
