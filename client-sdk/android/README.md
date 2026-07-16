@@ -1,130 +1,201 @@
-# ServerKey Android/IMGUI drop-in SDK
+# ServerKey Android/IMGUI SDK V2
 
-This folder is the reusable client layer used by the `aovjava` reference app.
-It is independent from the host app package, Activity, and IMGUI class name.
-It has no third-party Java or C++ dependency.
+This is the complete reusable client SDK tested by the AovJava pilot. It keeps
+the host's Activity, license dialog, toast, and IMGUI design untouched.
+Android networking and Keystore work live in one platform file; native policy,
+runtime gates, feature flags, notification state, and JNI entrypoints live in
+the prebuilt static archive.
 
-## 1. Install the sources
+## Package layout
 
-From the ServerKey repository root:
+```text
+java/com/serverkey/sdk/ServerKeyPlatform.java
+java/com/serverkey/sdk/GeneratedConnection.java   # dashboard ZIP only
+jni/ServerKey/include/serverkey_api.h
+jni/ServerKey/include/serverkey_imgui.hpp
+jni/ServerKey/lib/arm64-v8a/libserverkey_core.a
+jni/ServerKey/lib/armeabi-v7a/libserverkey_core.a
+jni/ServerKey/serverkey-prebuilt.mk
+jni/ServerKey/serverkey.cmake
+```
+
+The two archives are universal release-stripped builds of the native code
+validated by the AovJava pilot. They contain no product token, license,
+session, dashboard password, database credential, debug metadata, or local
+build path. A generated ZIP adds only the public connection URI for the
+selected product/project.
+
+## Requirements
+
+- Android API 23 or newer for AES-256-GCM Android Keystore storage.
+- Android NDK 26.1 is the reference toolchain; use C++17.
+- Supported ABIs: `arm64-v8a` and `armeabi-v7a`.
+- The host must already build and load one native `.so` library.
+- HTTPS server URL and `android.permission.INTERNET`.
+
+## Fast installation
+
+Download the full SDK ZIP from the dashboard, extract it, then run:
 
 ```bash
-sh client-sdk/android/install.sh /absolute/path/to/your-project/app/src/main
+sh install.sh /absolute/path/to/project/app/src/main
 ```
 
-For an `Android.mk` project, the installer also adds the two native source
-files automatically. For CMake, add these sources to the existing library:
+For a CMake project, pass the native target name as the second argument:
+
+```bash
+sh install.sh /absolute/path/to/project/app/src/main your_native_target
+```
+
+The installer copies one Java SDK file, generated connection settings when
+present, native headers/archives, adds INTERNET permission, adds ProGuard JNI
+rules, and automatically links a single-target Android.mk project.
+
+## Native link
+
+The archive must be linked whole because JNI entrypoints are discovered by
+name and otherwise look unused to the native linker.
+
+For ndk-build, declare the prebuilt module before the host module:
+
+```make
+LOCAL_PATH := $(call my-dir)
+include $(LOCAL_PATH)/ServerKey/serverkey-prebuilt.mk
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := your_native_library
+# existing LOCAL_SRC_FILES and libraries
+LOCAL_WHOLE_STATIC_LIBRARIES += serverkey_core
+include $(BUILD_SHARED_LIBRARY)
+```
+
+For CMake, add these lines after the host `add_library(...)`:
 
 ```cmake
-target_sources(your_native_library PRIVATE
-    ServerKey/RemotePolicy.cpp
-    ServerKey/NativeBridge.cpp)
+include(${CMAKE_CURRENT_LIST_DIR}/ServerKey/serverkey.cmake)
+serverkey_link(your_native_library)
 ```
 
-Load that native library before starting ServerKey. The bridge uses the fixed
-JNI package `com.serverkey.sdk`, so changing the host application's package
-does not require editing C++.
+Keep the fixed Java package `com.serverkey.sdk`. The application package can
+be anything. Call `System.loadLibrary("your_native_library")` before creating
+the Java runtime.
 
-## 2. Start it from the Activity
+## Java lifecycle
 
-Fastest path: generate a connection URI from **Integration API Generator** on
-the web dashboard, then use it directly:
-
-```java
-serverKey = ServerKeyRuntime.create(
-        getApplicationContext(),
-        SERVERKEY_CONNECTION_URI,
-        "1.0.0",
-        this);
-serverKey.start();
-```
-
-The URI contains only public connection metadata: HTTPS base URL, product
-identifier, project ID, and protocol version. It never contains an admin
-password, license, session token, or database credential.
-
-Manual configuration remains available when a generated URI is not desired.
-
-Keep the four project values in one settings class, then create the runtime:
+The Activity implements `ServerKeyPlatform.Listener` but keeps ownership of
+all UI:
 
 ```java
-serverKey = ServerKeyRuntime.create(
-        getApplicationContext(),
-        ServerKeySettings.BASE_URL,
-        ServerKeySettings.PRODUCT_TOKEN,
-        ServerKeySettings.PROJECT_ID,
-        ServerKeySettings.APP_VERSION,
-        this);
-serverKey.start();
-```
+import com.serverkey.sdk.GeneratedConnection;
+import com.serverkey.sdk.ServerKeyPlatform;
 
-The Activity implements `ServerKeyRuntime.Listener`. Its three callbacks only
-manage UI:
+private ServerKeyPlatform serverKey;
 
-```java
-@Override public void onPolicy(RemotePolicy policy) {
-    if (policy.sessionValid) dismissLicenseDialog();
+// Run after System.loadLibrary(...).
+private void startServerKey() {
+    serverKey = ServerKeyPlatform.create(
+            getApplicationContext(),
+            GeneratedConnection.CONNECTION_URI,
+            GeneratedConnection.APP_VERSION,
+            this);
+    serverKey.start();
+}
+
+@Override public void onPolicy(ServerKeyPlatform.Policy policy) {
+    if (policy.sessionValid) dismissExistingLicenseUi();
+    // policy.notificationFresh exposes a newly delivered server notification.
 }
 
 @Override public void onActivationRequired(String message) {
-    showLicenseDialog(message);
+    showExistingLicenseUi(message);
 }
 
 @Override public void onConnectionState(String state, String message) {
-    updateLicenseStatus(state, message);
+    updateExistingStatusUi(state, message);
+}
+
+private void submitLicense(String license) {
+    serverKey.activate(license);
+}
+
+@Override protected void onDestroy() {
+    if (serverKey != null) serverKey.stop();
+    super.onDestroy();
 }
 ```
 
-Submit and lifecycle calls are one line each:
+Those UI method names represent the host's existing UI. The SDK does not add
+or replace dialogs, layouts, IMGUI widgets, toast styling, or navigation.
 
-```java
-serverKey.activate(licenseInput.getText().toString());
-serverKey.stop(); // Activity.onDestroy()
-```
+## Native runtime and feature mapping
 
-## 3. Connect project-specific native behavior
-
-All policy parsing, master gates, feature gates, device identity, encrypted
-session storage, heartbeat, bans, and notifications are already handled by the
-SDK. A host that starts hooks or resets live toggles implements this optional
-callback in its existing native source:
+All native state starts fail-closed. Start workers/hooks only after policy
+authorization, and keep every active effect guarded:
 
 ```cpp
-extern "C" void ServerKey_OnPolicyApplied() {
-    ResetDisabledRuntimeEffects();
-    if (ServerKey::IsRuntimeAllowed()) StartNativeWorkersOnce();
-}
-```
+#include "serverkey_imgui.hpp"
 
-Every active effect still checks the master and feature gate:
-
-```cpp
 if (!ServerKey::IsRuntimeAllowed() ||
     !ServerKey::IsFeatureEnabled("menu_auto")) {
     return;
 }
 ```
 
-The SDK intentionally does not contain a license dialog or IMGUI layout. Those
-are visual choices owned by the host project; network and authorization logic
-must remain inside `ServerKeyRuntime`.
+Optional host callback:
 
-## Required settings
+```cpp
+extern "C" void ServerKey_OnPolicyApplied() {
+    if (!ServerKey::IsRuntimeAllowed()) {
+        DisableAllRuntimeFeatures();
+        return;
+    }
+    StartRuntimeFeaturesOnce();
+}
+```
 
-- `BASE_URL`: HTTPS ServerKey deployment URL.
-- `PRODUCT_TOKEN`: public product identifier created by the web console.
-- `PROJECT_ID`: stable unique name for this client family.
-- `APP_VERSION`: semantic client version such as `1.0.0`.
+Map each IMGUI group to a stable web feature key. `enabled=false` removes
+access; `locked=true` keeps the group visible but read-only. Never treat
+`menu_enabled` or one feature such as `menu_vip_core` as permission for every
+other feature.
 
-Never embed the admin password, Supabase service-role key, or deployment token
-in a client project.
+## Control contract
 
-## Standalone verification
+- All Clients Enabled is the global authorization switch.
+- Maintenance Mode revokes runtime while heartbeat continues.
+- Auto Update Allowed controls updater behavior only.
+- Minimum Version rejects outdated semantic versions.
+- Feature flags control individual host groups.
+- Device/license/session bans fail closed on the next heartbeat.
+- Notifications can target all clients or one reported device ID.
 
-The native policy gate has a host-independent smoke test:
+Heartbeat must remain running while the menu is locked so the web can unlock a
+client without rebuilding or restarting it.
+
+## Adding to a different project type
+
+1. Generate a unique Project ID and connection URI from the dashboard.
+2. Install the same universal `.a` package.
+3. Link it into the native `.so` loaded by that application.
+4. Start `ServerKeyPlatform` from the Android lifecycle.
+5. Map that project's own feature keys to UI groups and runtime effects.
+6. Reset reversible state whenever authorization or a feature is revoked.
+7. Test activation, restart/session restore, offline expiry, every remote
+   switch, bans, notification delivery, and both supported ABIs.
+
+For a non-IMGUI native client, use the stable C ABI in `serverkey_api.h`.
+`ServerKey_GetSnapshot`, `ServerKey_RuntimeAllowed`, and
+`ServerKey_FeatureEnabled` do not depend on IMGUI.
+
+## Verification
+
+Verify archive integrity from this directory:
 
 ```bash
-c++ -std=c++17 client-sdk/android/tests/RemotePolicyTest.cpp \
-    client-sdk/android/jni/ServerKey/RemotePolicy.cpp \
-    -o /tmp/serverkey-policy-test && /tmp/serverkey-policy-test
+sha256sum -c SHA256SUMS
+```
+
+After linking, verify that the final host `.so` exports the fixed JNI bridge:
+
+```bash
+llvm-nm -D path/to/libyour_native_library.so | grep NativeBridge_nativeInitialize
 ```

@@ -213,9 +213,13 @@ function buildIntegrationManifest({ baseUrl, productToken, productName, projectI
       transport: 'HTTPS'
     },
     android: {
+      sdk_version: '2.0.0',
       sdk_package_endpoint: '/api/admin/sdk-package',
       sdk_package_format: 'application/zip',
-      config_expression: `ServerKeyConfig.fromConnectionUri(${JSON.stringify(connectionUri)}, ${JSON.stringify(appVersion)})`
+      java_entrypoint: 'com.serverkey.sdk.ServerKeyPlatform',
+      native_archive: 'libserverkey_core.a',
+      supported_abis: ['arm64-v8a', 'armeabi-v7a'],
+      create_expression: `ServerKeyPlatform.create(context, ${JSON.stringify(connectionUri)}, ${JSON.stringify(appVersion)}, listener)`
     }
   };
 }
@@ -284,12 +288,13 @@ public final class GeneratedConnection {
     private GeneratedConnection() {}
 }
 `;
-  const quickStart = `# Generated ServerKey Android SDK
+  const quickStart = `# Generated ServerKey Android SDK V2
 
 This private package was generated for **${projectId}** version **${appVersion}**.
-It contains the complete Java/JNI drop-in SDK and a preconfigured
-\`GeneratedConnection.java\` file. It does not contain an admin password,
-license key, database credential, or client session.
+It contains the complete one-file Android platform bridge, universal native
+static archives, integration helpers, and a preconfigured
+\`GeneratedConnection.java\`. It does not contain an admin password, license
+key, database credential, or client session.
 
 ## Install
 
@@ -299,17 +304,24 @@ Extract the ZIP, then run from the extracted folder:
 sh install.sh /absolute/path/to/your-project/app/src/main
 \`\`\`
 
-For CMake projects, add \`ServerKey/RemotePolicy.cpp\` and
-\`ServerKey/NativeBridge.cpp\` to the host native target as described in
-\`README.md\`. The installer handles Android.mk automatically.
+For CMake, pass the host native target name as the second argument:
+
+\`\`\`bash
+sh install.sh /absolute/path/to/your-project/app/src/main your_native_target
+\`\`\`
+
+The archive must be linked into the same native \`.so\` loaded by the app. The
+installer handles a single-target Android.mk automatically. See \`README.md\`
+for multi-target Android.mk and manual CMake integration.
 
 ## Start from the Activity
 
 \`\`\`java
 import com.serverkey.sdk.GeneratedConnection;
-import com.serverkey.sdk.ServerKeyRuntime;
+import com.serverkey.sdk.ServerKeyPlatform;
 
-serverKey = ServerKeyRuntime.create(
+System.loadLibrary("your_native_library");
+serverKey = ServerKeyPlatform.create(
         getApplicationContext(),
         GeneratedConnection.CONNECTION_URI,
         GeneratedConnection.APP_VERSION,
@@ -317,8 +329,9 @@ serverKey = ServerKeyRuntime.create(
 serverKey.start();
 \`\`\`
 
-Implement \`ServerKeyRuntime.Listener\` using the complete callback example in
-\`README.md\`, and call \`serverKey.stop()\` from \`Activity.onDestroy()\`.
+Implement \`ServerKeyPlatform.Listener\` using the callback example in
+\`README.md\`, forward license text with \`serverKey.activate(...)\`, and call
+\`serverKey.stop()\` from \`Activity.onDestroy()\`.
 `;
   const entries = readSdkSourceEntries();
   entries.push(
@@ -522,7 +535,7 @@ app.get('/api/health', async (req, res) => {
       status: 'degraded',
       database_configured: false,
       schema_ready: false,
-      version: '4.5.0',
+      version: '4.6.0',
       message: 'Database environment variables are missing.',
       timestamp: new Date().toISOString()
     });
@@ -538,7 +551,7 @@ app.get('/api/health', async (req, res) => {
     status: schemaReady ? 'ok' : 'migration_required',
     database_configured: true,
     schema_ready: schemaReady,
-    version: '4.5.0',
+    version: '4.6.0',
     message: schemaReady ? 'ServerKey control plane is operational.' : 'Run supabase.sql to install the v4 database schema.',
     timestamp: new Date().toISOString()
   });

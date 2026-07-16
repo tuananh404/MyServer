@@ -1207,7 +1207,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const manifest = res.data.manifest;
         const connectionUri = manifest.connection_uri;
         const androidCode = [
-            'ServerKeyRuntime serverKey = ServerKeyRuntime.create(',
+            'import com.serverkey.sdk.ServerKeyPlatform;',
+            '',
+            '// Run after System.loadLibrary("your_native_library").',
+            'ServerKeyPlatform serverKey = ServerKeyPlatform.create(',
             '        getApplicationContext(),',
             `        ${JSON.stringify(connectionUri)},`,
             `        ${JSON.stringify(appVersion)},`,

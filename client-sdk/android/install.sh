@@ -1,13 +1,19 @@
 #!/usr/bin/env sh
 set -eu
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: sh client-sdk/android/install.sh /path/to/app/src/main" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+    echo "Usage: sh install.sh /path/to/app/src/main [cmake-native-target]" >&2
     exit 2
 fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 TARGET=$1
+CMAKE_TARGET=${2:-}
+
+if [ -n "$CMAKE_TARGET" ] && ! printf '%s' "$CMAKE_TARGET" | grep -Eq '^[A-Za-z0-9_.:+-]+$'; then
+    echo "cmake-native-target contains unsupported characters: $CMAKE_TARGET" >&2
+    exit 2
+fi
 
 if [ ! -f "$TARGET/AndroidManifest.xml" ]; then
     echo "AndroidManifest.xml was not found under: $TARGET" >&2
@@ -15,15 +21,26 @@ if [ ! -f "$TARGET/AndroidManifest.xml" ]; then
 fi
 
 JAVA_TARGET="$TARGET/java/com/serverkey/sdk"
-if [ -f "$TARGET/cpp/CMakeLists.txt" ]; then
+BUILD_KIND=manual
+if [ -n "$CMAKE_TARGET" ] && [ -f "$TARGET/cpp/CMakeLists.txt" ]; then
     NATIVE_ROOT="$TARGET/cpp"
-else
+    BUILD_KIND=cmake
+elif [ -f "$TARGET/jni/Android.mk" ]; then
     NATIVE_ROOT="$TARGET/jni"
+    BUILD_KIND=ndk-build
+elif [ -f "$TARGET/cpp/CMakeLists.txt" ]; then
+    NATIVE_ROOT="$TARGET/cpp"
+    BUILD_KIND=cmake
+else
+    NATIVE_ROOT="$TARGET/cpp"
 fi
-JNI_TARGET="$NATIVE_ROOT/ServerKey"
-mkdir -p "$JAVA_TARGET" "$JNI_TARGET"
-cp -f "$SCRIPT_DIR"/java/com/serverkey/sdk/*.java "$JAVA_TARGET"/
-cp -f "$SCRIPT_DIR"/jni/ServerKey/* "$JNI_TARGET"/
+
+mkdir -p "$JAVA_TARGET" "$NATIVE_ROOT/ServerKey"
+cp -f "$SCRIPT_DIR"/java/com/serverkey/sdk/ServerKeyPlatform.java "$JAVA_TARGET/"
+if [ -f "$SCRIPT_DIR/java/com/serverkey/sdk/GeneratedConnection.java" ]; then
+    cp -f "$SCRIPT_DIR/java/com/serverkey/sdk/GeneratedConnection.java" "$JAVA_TARGET/"
+fi
+cp -R "$SCRIPT_DIR/jni/ServerKey/." "$NATIVE_ROOT/ServerKey/"
 
 MANIFEST="$TARGET/AndroidManifest.xml"
 if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
@@ -38,27 +55,67 @@ if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
     mv "$TEMP_MANIFEST" "$MANIFEST"
 fi
 
-ANDROID_MK="$NATIVE_ROOT/Android.mk"
-if [ -f "$ANDROID_MK" ] && ! grep -q 'ServerKey/NativeBridge.cpp' "$ANDROID_MK"; then
-    TEMP_MK="$ANDROID_MK.serverkey.tmp"
-    awk '
-        /include[[:space:]]*\$\(BUILD_SHARED_LIBRARY\)/ && !inserted {
-            print "LOCAL_SRC_FILES += ServerKey/RemotePolicy.cpp ServerKey/NativeBridge.cpp"
-            inserted=1
-        }
-        { print }
-    ' "$ANDROID_MK" > "$TEMP_MK"
-    mv "$TEMP_MK" "$ANDROID_MK"
-fi
-
 APP_DIR=$(CDPATH= cd -- "$TARGET/../.." && pwd)
 PROGUARD="$APP_DIR/proguard-rules.pro"
-if [ -f "$PROGUARD" ] && ! grep -q 'com.serverkey.sdk.NativeBridge' "$PROGUARD"; then
-    printf '\n# ServerKey fixed JNI package\n-keep class com.serverkey.sdk.NativeBridge { *; }\n' >> "$PROGUARD"
+if [ -f "$PROGUARD" ]; then
+    if ! grep -q 'com.serverkey.sdk.NativeBridge' "$PROGUARD"; then
+        printf '\n# ServerKey V2 fixed JNI bridge\n-keep class com.serverkey.sdk.NativeBridge { *; }\n' >> "$PROGUARD"
+    fi
+    if ! grep -q 'com.serverkey.sdk.ServerKeyPlatform' "$PROGUARD"; then
+        printf '%s\n' '-keep class com.serverkey.sdk.ServerKeyPlatform { *; }' '-keep class com.serverkey.sdk.ServerKeyPlatform$* { *; }' >> "$PROGUARD"
+    fi
 fi
 
-echo "ServerKey Android SDK installed into: $TARGET"
-if [ ! -f "$ANDROID_MK" ]; then
-    echo "Native build note: add ServerKey/RemotePolicy.cpp and ServerKey/NativeBridge.cpp to your CMake/ndk-build target."
+if [ "$BUILD_KIND" = ndk-build ]; then
+    ANDROID_MK="$NATIVE_ROOT/Android.mk"
+    if ! grep -q 'ServerKey/serverkey-prebuilt.mk' "$ANDROID_MK"; then
+        TEMP_MK="$ANDROID_MK.serverkey.tmp"
+        awk '
+            /^LOCAL_PATH[[:space:]]*:?=/ && !inserted {
+                print
+                print "include $(LOCAL_PATH)/ServerKey/serverkey-prebuilt.mk"
+                inserted=1
+                next
+            }
+            { print }
+        ' "$ANDROID_MK" > "$TEMP_MK"
+        mv "$TEMP_MK" "$ANDROID_MK"
+    fi
+
+    SHARED_COUNT=$(grep -Ec 'include[[:space:]]+\$\(BUILD_SHARED_LIBRARY\)' "$ANDROID_MK" || true)
+    if [ "$SHARED_COUNT" -eq 1 ] && ! grep -Eq 'LOCAL_WHOLE_STATIC_LIBRARIES.*serverkey_core' "$ANDROID_MK"; then
+        TEMP_MK="$ANDROID_MK.serverkey.tmp"
+        awk '
+            /include[[:space:]]+\$\(BUILD_SHARED_LIBRARY\)/ && !inserted {
+                print "LOCAL_WHOLE_STATIC_LIBRARIES += serverkey_core"
+                inserted=1
+            }
+            { print }
+        ' "$ANDROID_MK" > "$TEMP_MK"
+        mv "$TEMP_MK" "$ANDROID_MK"
+    elif [ "$SHARED_COUNT" -ne 1 ]; then
+        echo "Android.mk has $SHARED_COUNT shared targets; add this to the target loaded by Java:" >&2
+        echo "LOCAL_WHOLE_STATIC_LIBRARIES += serverkey_core" >&2
+    fi
+elif [ "$BUILD_KIND" = cmake ]; then
+    CMAKE_FILE="$NATIVE_ROOT/CMakeLists.txt"
+    if [ -n "$CMAKE_TARGET" ]; then
+        if ! grep -q 'ServerKey/serverkey.cmake' "$CMAKE_FILE"; then
+            printf '\n# ServerKey V2 static SDK\ninclude(${CMAKE_CURRENT_LIST_DIR}/ServerKey/serverkey.cmake)\n' >> "$CMAKE_FILE"
+        fi
+        if ! grep -Fq "serverkey_link($CMAKE_TARGET)" "$CMAKE_FILE"; then
+            printf 'serverkey_link(%s)\n' "$CMAKE_TARGET" >> "$CMAKE_FILE"
+        fi
+    else
+        echo "CMake target was not supplied. Add these lines after add_library(...):" >&2
+        echo 'include(${CMAKE_CURRENT_LIST_DIR}/ServerKey/serverkey.cmake)' >&2
+        echo 'serverkey_link(your_native_target)' >&2
+    fi
+else
+    echo "No Android.mk or cpp/CMakeLists.txt was detected." >&2
+    echo "Copy succeeded; follow README.md section 'Native link' manually." >&2
 fi
-echo "Next: load your native library, create ServerKeyRuntime, then call start()."
+
+echo "ServerKey V2 installed into: $TARGET"
+echo "Load the host native library before ServerKeyPlatform.create(...)."
+echo "Use GeneratedConnection.CONNECTION_URI when installing a dashboard ZIP."

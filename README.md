@@ -188,10 +188,10 @@ Android IMGUI project with one command:
 sh client-sdk/android/install.sh /absolute/path/to/project/app/src/main
 ```
 
-The installer copies the Java/native sources, adds the Internet permission,
-patches common `Android.mk` projects, and preserves the fixed JNI bridge during
-R8/ProGuard. The host package and Activity name can be changed without editing
-the SDK bridge.
+SDK V2 copies one Java platform bridge plus universal native `.a` archives,
+adds Internet permission, supports single-target `Android.mk` automatically,
+and includes a CMake link helper. The host package, Activity, login UI, toast,
+and IMGUI layout remain owned by the client project.
 
 Logout:
 
@@ -247,7 +247,7 @@ Public client discovery endpoint:
 2. Push this repository to GitHub.
 3. Import the repository into Vercel.
 4. Add the environment variables listed above.
-5. Deploy and verify `/api/health` reports `status: ok` and version `4.5.0`.
+5. Deploy and verify `/api/health` reports `status: ok` and version `4.6.0`.
 
 The GitHub/Vercel integration will redeploy automatically after later pushes to
 the configured production branch.

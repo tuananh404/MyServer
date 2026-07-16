@@ -2,9 +2,10 @@
 
 ServerKey clients use a two-layer design:
 
-1. Java owns HTTPS activation, encrypted session persistence, heartbeat, and
-   lifecycle.
-2. Native C++ owns one fail-closed atomic master gate plus per-feature gates.
+1. The single `ServerKeyPlatform.java` owns HTTPS activation, encrypted session
+   persistence, device metadata, heartbeat, and lifecycle.
+2. `libserverkey_core.a` owns fixed JNI entrypoints, one fail-closed atomic
+   master gate, versioned policy state, notifications, and per-feature gates.
 
 The server contract is intentionally client-agnostic, so the same control plane
 can manage Java overlays, native IMGUI, or another UI framework.
@@ -66,11 +67,11 @@ still be consumed by a hook.
 - Automatic reactivation only for a genuinely expired session. Explicit
   revocation and bans must stay locked.
 
-The tracked drop-in package is in [`client-sdk/android`](../client-sdk/android/README.md).
-The same implementation is used by the sibling `aovjava` workspace under
-`com.serverkey.sdk` and `jni/ServerKey`. Its project-specific adapter maps
-`menu_vip_core`, `menu_aim`, `menu_auto`, and `menu_information` to the existing
-IMGUI tabs and hook entry points.
+The tracked V2 package is in
+[`client-sdk/android`](../client-sdk/android/README.md). The native archives are
+the same binaries validated by the AovJava pilot. A project-specific adapter
+maps keys such as `menu_vip_core`, `menu_aim`, `menu_auto`, and
+`menu_information` to its existing IMGUI tabs and hook entry points.
 
 ## Update adapter
 

@@ -19,7 +19,7 @@ function jsonResponse(status, data) {
 function successfulResponses() {
   return {
     '/api/health': jsonResponse(200, {
-      status: 'ok', schema_ready: true, database_configured: true, version: '4.5.0',
+      status: 'ok', schema_ready: true, database_configured: true, version: '4.6.0',
       message: 'ServerKey control plane is operational.'
     }),
     '/api/admin/get-keys': jsonResponse(200, {
@@ -175,7 +175,7 @@ test('master switch persists immediately and targeted notification uses the sele
   document.querySelector('#generate-integration-btn').click();
   await new Promise(resolve => dom.window.setTimeout(resolve, 80));
   assert.equal(document.querySelector('#integration-uri-output').value, connectionUri);
-  assert.match(document.querySelector('#integration-code-output').textContent, /ServerKeyRuntime\.create/);
+  assert.match(document.querySelector('#integration-code-output').textContent, /ServerKeyPlatform\.create/);
   assert.equal(document.querySelector('#integration-result').classList.contains('hidden'), false);
   assert.equal(document.querySelector('#download-sdk-zip').disabled, false);
   assert.equal(document.querySelector('.integration-api-meta a'), null);
@@ -186,7 +186,7 @@ test('migration and module failures are shown as degraded, never connected', asy
   const responses = successfulResponses();
   responses['/api/health'] = jsonResponse(503, {
     status: 'migration_required', schema_ready: false, database_configured: true,
-    version: '4.5.0', message: 'Run supabase.sql to install the v4 database schema.'
+    version: '4.6.0', message: 'Run supabase.sql to install the v4 database schema.'
   });
   for (const endpoint of ['/api/admin/stats', '/api/admin/control-config', '/api/admin/devices', '/api/admin/sessions']) {
     responses[endpoint] = jsonResponse(500, { success: false, message: `Database module unavailable: ${endpoint}` });

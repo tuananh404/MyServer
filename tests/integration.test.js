@@ -24,6 +24,9 @@ test('integration manifest creates a portable versioned ServerKey connection URI
   assert.equal(manifest.project.app_version, '1.2.3');
   assert.equal(Object.hasOwn(manifest, 'admin_password'), false);
   assert.equal(manifest.android.sdk_package_endpoint, '/api/admin/sdk-package');
+  assert.equal(manifest.android.sdk_version, '2.0.0');
+  assert.equal(manifest.android.java_entrypoint, 'com.serverkey.sdk.ServerKeyPlatform');
+  assert.deepEqual(manifest.android.supported_abis, ['arm64-v8a', 'armeabi-v7a']);
   assert.equal(JSON.stringify(manifest).includes('github.com'), false);
 });
 
@@ -44,10 +47,15 @@ test('private SDK package contains complete sources and generated project config
   const sdkPackage = buildSdkPackage(manifest);
   assert.equal(sdkPackage.filename, 'serverkey-client.vip-1-1.2.3.zip');
   assert.equal(sdkPackage.buffer.readUInt32LE(0), 0x04034b50);
-  assert.ok(sdkPackage.fileCount >= 17);
+  assert.ok(sdkPackage.fileCount >= 15);
   assert.ok(sdkPackage.buffer.includes(Buffer.from('GeneratedConnection.java')));
-  assert.ok(sdkPackage.buffer.includes(Buffer.from('ServerKeyRuntime.java')));
-  assert.ok(sdkPackage.buffer.includes(Buffer.from('NativeBridge.cpp')));
+  assert.ok(sdkPackage.buffer.includes(Buffer.from('ServerKeyPlatform.java')));
+  assert.ok(sdkPackage.buffer.includes(Buffer.from('lib/arm64-v8a/libserverkey_core.a')));
+  assert.ok(sdkPackage.buffer.includes(Buffer.from('lib/armeabi-v7a/libserverkey_core.a')));
+  assert.ok(sdkPackage.buffer.includes(Buffer.from('serverkey-prebuilt.mk')));
+  assert.ok(sdkPackage.buffer.includes(Buffer.from('serverkey.cmake')));
+  assert.equal(sdkPackage.buffer.includes(Buffer.from('ServerKeyRuntime.java')), false);
+  assert.equal(sdkPackage.buffer.includes(Buffer.from('NativeBridge.cpp')), false);
   assert.ok(sdkPackage.buffer.includes(Buffer.from(manifest.connection_uri)));
   assert.equal(sdkPackage.buffer.includes(Buffer.from('ADMIN_PASSWORD')), false);
 });
