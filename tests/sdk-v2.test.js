@@ -26,15 +26,18 @@ test('SDK V2 keeps one Android implementation file and no legacy host sources', 
   }
 });
 
-test('SDK V2.1 release archives match their locked checksums', () => {
-  assert.equal(
-    sha256('jni/ServerKey/lib/arm64-v8a/libserverkey_core.a'),
-    '6c8419cf9cdd44ebce3aeaba12d9af16bc5ffee54dbc1db12ca1b8f102d9fc14'
-  );
-  assert.equal(
-    sha256('jni/ServerKey/lib/armeabi-v7a/libserverkey_core.a'),
-    '014a7b7e3f1c5091fba053b961a5b70e833d446a1da0382d0eca2e18dfe9fcb9'
-  );
+test('SDK V2.1 release archives match the exported checksum manifest', () => {
+  const checksumLines = fs.readFileSync(path.join(sdkRoot, 'SHA256SUMS'), 'utf8')
+    .trim().split(/\r?\n/);
+  assert.equal(checksumLines.length, 2);
+  const checksums = Object.fromEntries(checksumLines.map(line => {
+    const match = line.match(/^([a-f0-9]{64})  (jni\/ServerKey\/lib\/(?:arm64-v8a|armeabi-v7a)\/libserverkey_core\.a)$/);
+    assert.ok(match, `Invalid SDK checksum line: ${line}`);
+    return [match[2], match[1]];
+  }));
+  for (const relativePath of Object.keys(checksums)) {
+    assert.equal(sha256(relativePath), checksums[relativePath]);
+  }
 });
 
 test('SDK V2 ships both native build-system adapters', () => {

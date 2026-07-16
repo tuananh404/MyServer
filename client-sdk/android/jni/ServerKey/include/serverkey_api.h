@@ -110,15 +110,20 @@ SERVERKEY_API ServerKeyResult ServerKey_Initialize(const char* product_token);
 SERVERKEY_API void ServerKey_Shutdown(void);
 SERVERKEY_API uint8_t ServerKey_IsInitialized(void);
 SERVERKEY_API uint32_t ServerKey_CopyProductToken(char* output, uint32_t output_size);
+
 SERVERKEY_API ServerKeyResult ServerKey_SetCallbacks(const ServerKeyCallbacks* callbacks);
 SERVERKEY_API ServerKeyResult ServerKey_ApplyPolicy(const ServerKeyPolicyInput* policy);
 SERVERKEY_API ServerKeyResult ServerKey_SetConnectionState(
         ServerKeyState state, const char* connection_state,
         const char* status_code, const char* status_message);
+
 SERVERKEY_API uint8_t ServerKey_RuntimeAllowed(void);
 SERVERKEY_API uint8_t ServerKey_FeatureEnabled(const char* feature_key);
 SERVERKEY_API uint8_t ServerKey_FeatureLocked(const char* feature_key);
 SERVERKEY_API ServerKeyResult ServerKey_GetSnapshot(ServerKeySnapshot* output);
+
+// Run from the host UI/render thread. Callbacks are never invoked from the
+// network thread that applies a policy.
 SERVERKEY_API uint32_t ServerKey_PumpEvents(uint32_t max_events);
 
 #ifdef __cplusplus
