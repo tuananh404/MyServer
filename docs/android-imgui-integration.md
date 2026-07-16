@@ -5,7 +5,8 @@ ServerKey clients use a two-layer design:
 1. The single `ServerKeyPlatform.java` owns HTTPS activation, encrypted session
    persistence, device metadata, heartbeat, and lifecycle.
 2. `libserverkey_core.a` owns fixed JNI entrypoints, one fail-closed atomic
-   master gate, versioned policy state, notifications, and per-feature gates.
+   master gate, versioned policy state, per-feature gates, and the standard
+   lock/notification IMGUI surfaces.
 
 The server contract is intentionally client-agnostic, so the same control plane
 can manage Java overlays, native IMGUI, or another UI framework.
@@ -67,11 +68,16 @@ still be consumed by a hook.
 - Automatic reactivation only for a genuinely expired session. Explicit
   revocation and bans must stay locked.
 
-The tracked V2 package is in
+The tracked V2.1 package is in
 [`client-sdk/android`](../client-sdk/android/README.md). The native archives are
 the same binaries validated by the AovJava pilot. A project-specific adapter
 maps keys such as `menu_vip_core`, `menu_aim`, `menu_auto`, and
 `menu_information` to its existing IMGUI tabs and hook entry points.
+
+The host calls `ServerKey::DrawUi` for the lock panel, notification page, and
+notification overlay. It only handles the returned navigation request. The
+renderer, unread state, animation, localization, and touch bounds are compiled
+inside the static archive rather than copied into each customer's `main.cpp`.
 
 ## Update adapter
 

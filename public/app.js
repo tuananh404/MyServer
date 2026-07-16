@@ -1,5 +1,5 @@
 /**
- * ServerKey Cloud Business Control Center v4.5
+ * ServerKey Cloud Business Control Center v4.7
  * Real-state owner dashboard for licenses, devices and remote client policy.
  */
 

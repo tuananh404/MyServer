@@ -36,8 +36,9 @@ import javax.net.ssl.HttpsURLConnection;
 
 /**
  * The only Android platform file required by the ServerKey static SDK.
- * It owns no Activity, dialog, toast, or IMGUI widget. The linked native
- * archive remains the authoritative runtime/feature gate.
+ * It owns no Activity or Android dialog. The linked native archive remains
+ * the authoritative runtime/feature gate and optionally renders the standard
+ * ServerKey lock/notification surfaces inside an existing IMGUI frame.
  */
 public final class ServerKeyPlatform {
     public interface Listener {
@@ -733,7 +734,7 @@ final class NativeBridge {
 
     private static IllegalStateException linkageError(UnsatisfiedLinkError cause) {
         return new IllegalStateException(
-                "Link libserverkey_core.a with whole-archive before ServerKeyPlatform starts.", cause);
+                "Link libserverkey_core.a and retain its NativeBridge JNI entrypoint before ServerKeyPlatform starts.", cause);
     }
 
     private static native boolean nativeInitialize(String productToken);

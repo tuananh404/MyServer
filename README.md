@@ -188,10 +188,11 @@ Android IMGUI project with one command:
 sh client-sdk/android/install.sh /absolute/path/to/project/app/src/main
 ```
 
-SDK V2 copies one Java platform bridge plus universal native `.a` archives,
+SDK V2.1 copies one Java platform bridge plus universal native `.a` archives,
 adds Internet permission, supports single-target `Android.mk` automatically,
-and includes a CMake link helper. The host package, Activity, login UI, toast,
-and IMGUI layout remain owned by the client project.
+and includes a CMake link helper. The host keeps its package, Activity, login
+UI, and feature layout; the standard lock panel and notification toast/page are
+now rendered from the protected `.a` with only a few calls in `main.cpp`.
 
 Logout:
 

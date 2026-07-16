@@ -1,10 +1,10 @@
-# ServerKey Android/IMGUI SDK V2
+# ServerKey Android/IMGUI SDK V2.1
 
 This is the complete reusable client SDK tested by the AovJava pilot. It keeps
-the host's Activity, license dialog, toast, and IMGUI design untouched.
-Android networking and Keystore work live in one platform file; native policy,
-runtime gates, feature flags, notification state, and JNI entrypoints live in
-the prebuilt static archive.
+the host's Activity, license dialog, and feature layout untouched. Android
+networking and Keystore work live in one platform file. Native policy, runtime
+gates, feature flags, the standard lock panel, notification page/toast state,
+animation, touch rectangle, and JNI entrypoints live in one prebuilt archive.
 
 ## Package layout
 
@@ -13,6 +13,7 @@ java/com/serverkey/sdk/ServerKeyPlatform.java
 java/com/serverkey/sdk/GeneratedConnection.java   # dashboard ZIP only
 jni/ServerKey/include/serverkey_api.h
 jni/ServerKey/include/serverkey_imgui.hpp
+jni/ServerKey/include/serverkey_ui.h
 jni/ServerKey/lib/arm64-v8a/libserverkey_core.a
 jni/ServerKey/lib/armeabi-v7a/libserverkey_core.a
 jni/ServerKey/serverkey-prebuilt.mk
@@ -31,6 +32,7 @@ selected product/project.
 - Android NDK 26.1 is the reference toolchain; use C++17.
 - Supported ABIs: `arm64-v8a` and `armeabi-v7a`.
 - The host must already build and load one native `.so` library.
+- Standard UI surfaces require Dear ImGui `1.88 WIP` (`IMGUI_VERSION_NUM 18707`).
 - HTTPS server URL and `android.permission.INTERNET`.
 
 ## Fast installation
@@ -53,8 +55,9 @@ rules, and automatically links a single-target Android.mk project.
 
 ## Native link
 
-The archive must be linked whole because JNI entrypoints are discovered by
-name and otherwise look unused to the native linker.
+The helper retains the fixed JNI entrypoint without forcing the optional IMGUI
+object into non-IMGUI clients. Do not link the entire archive with
+`--whole-archive`.
 
 For ndk-build, declare the prebuilt module before the host module:
 
@@ -65,7 +68,8 @@ include $(LOCAL_PATH)/ServerKey/serverkey-prebuilt.mk
 include $(CLEAR_VARS)
 LOCAL_MODULE := your_native_library
 # existing LOCAL_SRC_FILES and libraries
-LOCAL_WHOLE_STATIC_LIBRARIES += serverkey_core
+LOCAL_STATIC_LIBRARIES += serverkey_core
+LOCAL_LDFLAGS += -Wl,-u,Java_com_serverkey_sdk_NativeBridge_nativeInitialize
 include $(BUILD_SHARED_LIBRARY)
 ```
 
@@ -82,8 +86,8 @@ the Java runtime.
 
 ## Java lifecycle
 
-The Activity implements `ServerKeyPlatform.Listener` but keeps ownership of
-all UI:
+The Activity implements `ServerKeyPlatform.Listener` and keeps ownership of
+the Android lifecycle and license dialog:
 
 ```java
 import com.serverkey.sdk.GeneratedConnection;
@@ -124,8 +128,39 @@ private void submitLicense(String license) {
 }
 ```
 
-Those UI method names represent the host's existing UI. The SDK does not add
-or replace dialogs, layouts, IMGUI widgets, toast styling, or navigation.
+Those Android UI method names represent the host's existing license dialog.
+The SDK does not replace the Activity or project-specific feature layout.
+
+## Built-in IMGUI lock and notification UI
+
+Call the three surfaces from the existing render frame. Their content comes
+from the current server policy; the animation, unread state, toast styling,
+touch rectangle, English/Vietnamese text, and notification-page rendering stay
+inside `libserverkey_core.a`.
+
+```cpp
+#include "serverkey_imgui.hpp"
+
+// Inside the menu content child when runtime is locked:
+ServerKey::DrawUi(ServerKey::UiSurface::LockPanel,
+                  screenWidth, screenHeight, useVietnamese, uiScale);
+
+// Inside the existing notification tab:
+ServerKey::DrawUi(ServerKey::UiSurface::NotificationPage,
+                  screenWidth, screenHeight, useVietnamese, uiScale);
+
+// Once per frame after the main menu:
+const ServerKey::UiResult ui = ServerKey::DrawUi(
+        ServerKey::UiSurface::NotificationOverlay,
+        screenWidth, screenHeight, useVietnamese, uiScale);
+if (ui.openNotification) openExistingNotificationTab();
+```
+
+Use `ServerKey::HasUnreadNotification()` for the tab dot and
+`ServerKey::GetLastUiResult()` when an Android overlay needs the toast touch
+rectangle. Call `ServerKey::ResetUi()` before destroying the ImGui context.
+No `DrawServerKeyLockPanel`, toast state machine, or notification renderer is
+copied into the customer's `main.cpp`.
 
 ## Native runtime and feature mapping
 
@@ -182,7 +217,8 @@ client without rebuilding or restarting it.
 7. Test activation, restart/session restore, offline expiry, every remote
    switch, bans, notification delivery, and both supported ABIs.
 
-For a non-IMGUI native client, use the stable C ABI in `serverkey_api.h`.
+For a non-IMGUI native client, use the stable C ABI in `serverkey_api.h` and do
+not call `ServerKeyUi_Draw`.
 `ServerKey_GetSnapshot`, `ServerKey_RuntimeAllowed`, and
 `ServerKey_FeatureEnabled` do not depend on IMGUI.
 

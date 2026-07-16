@@ -83,11 +83,24 @@ if [ "$BUILD_KIND" = ndk-build ]; then
     fi
 
     SHARED_COUNT=$(grep -Ec 'include[[:space:]]+\$\(BUILD_SHARED_LIBRARY\)' "$ANDROID_MK" || true)
-    if [ "$SHARED_COUNT" -eq 1 ] && ! grep -Eq 'LOCAL_WHOLE_STATIC_LIBRARIES.*serverkey_core' "$ANDROID_MK"; then
+    if grep -Eq 'LOCAL_WHOLE_STATIC_LIBRARIES.*serverkey_core' "$ANDROID_MK"; then
+        TEMP_MK="$ANDROID_MK.serverkey.tmp"
+        awk '
+            /LOCAL_WHOLE_STATIC_LIBRARIES.*serverkey_core/ {
+                gsub(/serverkey_core/, "")
+                print
+                print "LOCAL_STATIC_LIBRARIES += serverkey_core"
+                next
+            }
+            { print }
+        ' "$ANDROID_MK" > "$TEMP_MK"
+        mv "$TEMP_MK" "$ANDROID_MK"
+    fi
+    if [ "$SHARED_COUNT" -eq 1 ] && ! grep -Eq 'LOCAL_STATIC_LIBRARIES.*serverkey_core' "$ANDROID_MK"; then
         TEMP_MK="$ANDROID_MK.serverkey.tmp"
         awk '
             /include[[:space:]]+\$\(BUILD_SHARED_LIBRARY\)/ && !inserted {
-                print "LOCAL_WHOLE_STATIC_LIBRARIES += serverkey_core"
+                print "LOCAL_STATIC_LIBRARIES += serverkey_core"
                 inserted=1
             }
             { print }
@@ -95,7 +108,20 @@ if [ "$BUILD_KIND" = ndk-build ]; then
         mv "$TEMP_MK" "$ANDROID_MK"
     elif [ "$SHARED_COUNT" -ne 1 ]; then
         echo "Android.mk has $SHARED_COUNT shared targets; add this to the target loaded by Java:" >&2
-        echo "LOCAL_WHOLE_STATIC_LIBRARIES += serverkey_core" >&2
+        echo "LOCAL_STATIC_LIBRARIES += serverkey_core" >&2
+    fi
+    if [ "$SHARED_COUNT" -eq 1 ] && ! grep -q 'Java_com_serverkey_sdk_NativeBridge_nativeInitialize' "$ANDROID_MK"; then
+        TEMP_MK="$ANDROID_MK.serverkey.tmp"
+        awk '
+            /include[[:space:]]+\$\(BUILD_SHARED_LIBRARY\)/ && !inserted {
+                print "LOCAL_LDFLAGS += -Wl,-u,Java_com_serverkey_sdk_NativeBridge_nativeInitialize"
+                inserted=1
+            }
+            { print }
+        ' "$ANDROID_MK" > "$TEMP_MK"
+        mv "$TEMP_MK" "$ANDROID_MK"
+    elif [ "$SHARED_COUNT" -ne 1 ]; then
+        echo "LOCAL_LDFLAGS += -Wl,-u,Java_com_serverkey_sdk_NativeBridge_nativeInitialize" >&2
     fi
 elif [ "$BUILD_KIND" = cmake ]; then
     CMAKE_FILE="$NATIVE_ROOT/CMakeLists.txt"
@@ -116,6 +142,6 @@ else
     echo "Copy succeeded; follow README.md section 'Native link' manually." >&2
 fi
 
-echo "ServerKey V2 installed into: $TARGET"
+echo "ServerKey V2.1 installed into: $TARGET"
 echo "Load the host native library before ServerKeyPlatform.create(...)."
 echo "Use GeneratedConnection.CONNECTION_URI when installing a dashboard ZIP."

@@ -24,10 +24,9 @@ function(serverkey_link target_name)
         message(FATAL_ERROR "serverkey_link target does not exist: ${target_name}")
     endif()
     target_compile_features("${target_name}" PRIVATE cxx_std_17)
-    # JNI entrypoints have no direct native reference, so the archive must be
-    # linked whole or the linker is allowed to discard its object files.
-    target_link_libraries("${target_name}" PRIVATE
-        "-Wl,--whole-archive"
-        serverkey_core
-        "-Wl,--no-whole-archive")
+    # Retain the JNI translation unit without forcing optional IMGUI objects
+    # into non-IMGUI clients.
+    target_link_options("${target_name}" PRIVATE
+        "-Wl,-u,Java_com_serverkey_sdk_NativeBridge_nativeInitialize")
+    target_link_libraries("${target_name}" PRIVATE serverkey_core)
 endfunction()
