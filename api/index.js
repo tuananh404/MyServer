@@ -213,7 +213,7 @@ function buildIntegrationManifest({ baseUrl, productToken, productName, projectI
       transport: 'HTTPS'
     },
     android: {
-      sdk_version: '2.1.0',
+      sdk_version: '2.1.1',
       sdk_package_endpoint: '/api/admin/sdk-package',
       sdk_package_format: 'application/zip',
       java_entrypoint: 'com.serverkey.sdk.ServerKeyPlatform',
@@ -289,7 +289,7 @@ public final class GeneratedConnection {
     private GeneratedConnection() {}
 }
 `;
-  const quickStart = `# Generated ServerKey Android SDK V2.1
+  const quickStart = `# Generated ServerKey Android SDK V2.1.1
 
 This private package was generated for **${projectId}** version **${appVersion}**.
 It contains the complete one-file Android platform bridge, universal native
@@ -538,7 +538,7 @@ app.get('/api/health', async (req, res) => {
       status: 'degraded',
       database_configured: false,
       schema_ready: false,
-      version: '4.7.0',
+      version: '4.7.1',
       message: 'Database environment variables are missing.',
       timestamp: new Date().toISOString()
     });
@@ -554,7 +554,7 @@ app.get('/api/health', async (req, res) => {
     status: schemaReady ? 'ok' : 'migration_required',
     database_configured: true,
     schema_ready: schemaReady,
-    version: '4.7.0',
+    version: '4.7.1',
     message: schemaReady ? 'ServerKey control plane is operational.' : 'Run supabase.sql to install the v4 database schema.',
     timestamp: new Date().toISOString()
   });

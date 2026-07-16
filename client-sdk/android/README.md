@@ -1,4 +1,4 @@
-# ServerKey Android/IMGUI SDK V2.1
+# ServerKey Android/IMGUI SDK V2.1.1
 
 This is the complete reusable client SDK tested by the AovJava pilot. It keeps
 the host's Activity, license dialog, and feature layout untouched. Android

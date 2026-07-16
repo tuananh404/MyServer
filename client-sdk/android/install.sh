@@ -142,6 +142,6 @@ else
     echo "Copy succeeded; follow README.md section 'Native link' manually." >&2
 fi
 
-echo "ServerKey V2.1 installed into: $TARGET"
+echo "ServerKey V2.1.1 installed into: $TARGET"
 echo "Load the host native library before ServerKeyPlatform.create(...)."
 echo "Use GeneratedConnection.CONNECTION_URI when installing a dashboard ZIP."

@@ -68,7 +68,7 @@ still be consumed by a hook.
 - Automatic reactivation only for a genuinely expired session. Explicit
   revocation and bans must stay locked.
 
-The tracked V2.1 package is in
+The tracked V2.1.1 package is in
 [`client-sdk/android`](../client-sdk/android/README.md). The native archives are
 the same binaries validated by the AovJava pilot. A project-specific adapter
 maps keys such as `menu_vip_core`, `menu_aim`, `menu_auto`, and
