@@ -1,5 +1,5 @@
 /**
- * ServerKey Cloud Business Control Center v4.3
+ * ServerKey Cloud Business Control Center v4.4
  * Real-state owner dashboard for licenses, devices and remote client policy.
  */
 
@@ -56,6 +56,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const tokenDescInput = document.getElementById('token-desc-input');
     const createTokenBtn = document.getElementById('create-token-btn');
     const tokensTableBody = document.getElementById('tokens-table-body');
+
+    // Universal Project Connect elements
+    const integrationProductInput = document.getElementById('integration-product-input');
+    const integrationProjectInput = document.getElementById('integration-project-input');
+    const integrationVersionInput = document.getElementById('integration-version-input');
+    const generateIntegrationBtn = document.getElementById('generate-integration-btn');
+    const integrationResult = document.getElementById('integration-result');
+    const integrationProductLabel = document.getElementById('integration-product-label');
+    const integrationUriOutput = document.getElementById('integration-uri-output');
+    const integrationCodeOutput = document.getElementById('integration-code-output');
+    const integrationBootstrapOutput = document.getElementById('integration-bootstrap-output');
+    const copyIntegrationUriBtn = document.getElementById('copy-integration-uri');
+    const copyIntegrationCodeBtn = document.getElementById('copy-integration-code');
 
     // Generator elements
     const tokenSelect = document.getElementById('token-select');
@@ -314,6 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderFraudLogs();
         renderTokens();
         renderTokenSelect();
+        renderIntegrationProducts();
         renderControlPlane();
         renderFeatureFlags();
         renderDevices();
@@ -586,6 +600,27 @@ document.addEventListener('DOMContentLoaded', () => {
     function getSelectedToken() {
         if (!state.selectedTokenId) return null;
         return state.tokensList.find(t => String(t.id) === String(state.selectedTokenId)) || null;
+    }
+
+    function renderIntegrationProducts() {
+        const selected = integrationProductInput.value;
+        if (state.moduleErrors.tokens) {
+            integrationProductInput.innerHTML = '<option value="">Không tải được sản phẩm</option>';
+            integrationProductInput.disabled = true;
+            generateIntegrationBtn.disabled = true;
+            return;
+        }
+        integrationProductInput.disabled = false;
+        generateIntegrationBtn.disabled = state.tokensList.length === 0;
+        integrationProductInput.innerHTML = '<option value="">Chọn sản phẩm</option>' +
+            state.tokensList.map(token =>
+                `<option value="${escapeHTML(token.token_string)}">${escapeHTML(token.token_name)}</option>`
+            ).join('');
+        if ([...integrationProductInput.options].some(option => option.value === selected)) {
+            integrationProductInput.value = selected;
+        } else if (state.tokensList.length === 1) {
+            integrationProductInput.value = state.tokensList[0].token_string;
+        }
     }
 
     function updatePresetStates() {
@@ -980,7 +1015,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderDevices() {
         if (state.moduleErrors.devices) {
-            devicesTableBody.innerHTML = tableErrorRow(state.moduleErrors.devices, 9);
+            devicesTableBody.innerHTML = tableErrorRow(state.moduleErrors.devices, 10);
             return;
         }
         renderNotificationTargets();
@@ -988,11 +1023,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const devices = state.devices.filter(device => {
             if (!query) return true;
             const licenses = (device.licenses || []).map(item => item.key_string).join(' ');
-            return `${device.device_name || ''} ${device.hwid} ${device.app_version || ''} ${licenses}`.toLowerCase().includes(query);
+            return `${device.device_name || ''} ${device.project_id || ''} ${device.hwid} ${device.app_version || ''} ${licenses}`.toLowerCase().includes(query);
         });
 
         if (devices.length === 0) {
-            devicesTableBody.innerHTML = '<tr><td colspan="9" class="loading-state">Không tìm thấy thiết bị</td></tr>';
+            devicesTableBody.innerHTML = '<tr><td colspan="10" class="loading-state">Không tìm thấy thiết bị</td></tr>';
             return;
         }
 
@@ -1004,6 +1039,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
                 <tr>
                     <td data-label="Tên thiết bị"><strong>${escapeHTML(device.device_name || 'Android device')}</strong></td>
+                    <td data-label="Project"><span class="project-chip">${escapeHTML(device.project_id || 'legacy')}</span></td>
                     <td data-label="Device ID"><span class="mono-value">${escapeHTML(device.hwid)}</span></td>
                     <td data-label="Version">${escapeHTML(device.app_version || '—')}</td>
                     <td data-label="Licenses">${licenses}</td>
@@ -1088,6 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td data-label="Session" class="mono-value">#${session.id}</td>
                     <td data-label="Device">
                         <strong>${escapeHTML(session.device?.device_name || 'Android device')}</strong>
+                        <span class="project-chip">${escapeHTML(session.device?.project_id || 'legacy')}</span>
                         <span class="mono-value muted-value device-id-secondary">${escapeHTML(session.device?.hwid || '—')}</span>
                     </td>
                     <td data-label="License">${escapeHTML(session.license?.key_string || '—')}</td>
@@ -1127,6 +1164,75 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.querySelectorAll('.quick-nav').forEach(button => {
         button.addEventListener('click', () => setActiveView(button.dataset.targetView));
+    });
+
+    generateIntegrationBtn.addEventListener('click', async () => {
+        const productToken = integrationProductInput.value;
+        const projectId = integrationProjectInput.value.trim();
+        const appVersion = integrationVersionInput.value.trim();
+        if (!productToken) {
+            showToast('Hãy chọn sản phẩm cần kết nối.', 'error');
+            integrationProductInput.focus();
+            return;
+        }
+        if (!/^[A-Za-z0-9._-]{2,64}$/.test(projectId)) {
+            showToast('Project ID cần 2–64 ký tự: chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.', 'error');
+            integrationProjectInput.focus();
+            return;
+        }
+        if (!/^\d+\.\d+\.\d+(?:[-+].*)?$/.test(appVersion)) {
+            showToast('App Version phải theo semantic version, ví dụ 1.0.0.', 'error');
+            integrationVersionInput.focus();
+            return;
+        }
+
+        generateIntegrationBtn.disabled = true;
+        generateIntegrationBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Đang tạo manifest…</span>';
+        const res = await apiRequest('/api/admin/integration-manifest', 'POST', {
+            product_token: productToken,
+            project_id: projectId,
+            app_version: appVersion
+        });
+        generateIntegrationBtn.disabled = false;
+        generateIntegrationBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i><span>Tạo kết nối · Generate</span>';
+        if (!res.success) {
+            showToast(res.message || 'Không thể tạo integration manifest.', 'error');
+            return;
+        }
+
+        const manifest = res.data.manifest;
+        const connectionUri = manifest.connection_uri;
+        const androidCode = [
+            'ServerKeyRuntime serverKey = ServerKeyRuntime.create(',
+            '        getApplicationContext(),',
+            `        ${JSON.stringify(connectionUri)},`,
+            `        ${JSON.stringify(appVersion)},`,
+            '        this);',
+            'serverKey.start();'
+        ].join('\n');
+        const bootstrapQuery = new URLSearchParams({
+            project_id: projectId,
+            app_version: appVersion
+        });
+        integrationUriOutput.value = connectionUri;
+        integrationCodeOutput.textContent = androidCode;
+        integrationBootstrapOutput.textContent =
+            `${manifest.server.base_url}${manifest.server.bootstrap}?${bootstrapQuery}`;
+        integrationProductLabel.textContent = manifest.project.product_name;
+        integrationResult.classList.remove('hidden');
+        showToast('Connection manifest đã sẵn sàng để tích hợp.', 'success');
+    });
+
+    copyIntegrationUriBtn.addEventListener('click', () => {
+        copyToClipboard(integrationUriOutput.value).then(() => {
+            showToast('Đã sao chép connection URI.', 'success');
+        });
+    });
+
+    copyIntegrationCodeBtn.addEventListener('click', () => {
+        copyToClipboard(integrationCodeOutput.textContent).then(() => {
+            showToast('Đã sao chép code tích hợp Android.', 'success');
+        });
     });
 
     [maintenanceModeInput, autoUpdateEnabledInput, minimumVersionInput,

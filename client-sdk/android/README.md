@@ -27,6 +27,24 @@ does not require editing C++.
 
 ## 2. Start it from the Activity
 
+Fastest path: generate a connection URI from **Integration API Generator** on
+the web dashboard, then use it directly:
+
+```java
+serverKey = ServerKeyRuntime.create(
+        getApplicationContext(),
+        SERVERKEY_CONNECTION_URI,
+        "1.0.0",
+        this);
+serverKey.start();
+```
+
+The URI contains only public connection metadata: HTTPS base URL, product
+identifier, project ID, and protocol version. It never contains an admin
+password, license, session token, or database credential.
+
+Manual configuration remains available when a generated URI is not desired.
+
 Keep the four project values in one settings class, then create the runtime:
 
 ```java

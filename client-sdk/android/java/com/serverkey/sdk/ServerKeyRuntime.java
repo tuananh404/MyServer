@@ -37,6 +37,15 @@ public final class ServerKeyRuntime implements ServerKeyClient.Listener {
         return new ServerKeyRuntime(context, config, listener);
     }
 
+    public static ServerKeyRuntime create(Context context,
+                                          String connectionUri,
+                                          String appVersion,
+                                          Listener listener) {
+        return new ServerKeyRuntime(context,
+                ServerKeyConfig.fromConnectionUri(connectionUri, appVersion),
+                listener);
+    }
+
     private ServerKeyRuntime(Context context, ServerKeyConfig config,
                              Listener listener) {
         if (context == null || config == null || listener == null) {

@@ -25,6 +25,24 @@ public final class ServerKeyConfig {
         return new Builder(baseUrl, productToken, projectId, appVersion);
     }
 
+    public static ServerKeyConfig fromConnectionUri(String connectionUri,
+                                                     String appVersion) {
+        Uri uri = Uri.parse(connectionUri == null ? "" : connectionUri.trim());
+        if (!"serverkey".equalsIgnoreCase(uri.getScheme()) ||
+                !"connect".equalsIgnoreCase(uri.getHost())) {
+            throw new IllegalArgumentException("Invalid ServerKey connection URI.");
+        }
+        String protocol = uri.getQueryParameter("protocol");
+        if (!"1".equals(protocol)) {
+            throw new IllegalArgumentException("Unsupported ServerKey connection protocol.");
+        }
+        return builder(
+                uri.getQueryParameter("base_url"),
+                uri.getQueryParameter("product_token"),
+                uri.getQueryParameter("project_id"),
+                appVersion).build();
+    }
+
     private static String trimTrailingSlash(String value) {
         String result = value == null ? "" : value.trim();
         while (result.endsWith("/")) result = result.substring(0, result.length() - 1);

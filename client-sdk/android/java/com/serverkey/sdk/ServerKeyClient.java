@@ -120,6 +120,7 @@ public final class ServerKeyClient {
             body.put("key_string", license);
             body.put("hwid", deviceId);
             body.put("device_name", deviceName);
+            body.put("project_id", config.projectId);
             body.put("app_version", config.appVersion);
             body.put("last_notification_id", lastNotificationId);
             HttpResult result = postJson("/api/v1/client/activate", body, "");
@@ -161,6 +162,7 @@ public final class ServerKeyClient {
             JSONObject body = new JSONObject();
             body.put("app_version", config.appVersion);
             body.put("device_name", deviceName);
+            body.put("project_id", config.projectId);
             body.put("last_notification_id", lastNotificationId);
             HttpResult result = postJson("/api/v1/client/heartbeat", body, sessionToken);
             String responseCode = result.body.optString("code", "");

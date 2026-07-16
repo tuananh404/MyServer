@@ -19,7 +19,7 @@ function jsonResponse(status, data) {
 function successfulResponses() {
   return {
     '/api/health': jsonResponse(200, {
-      status: 'ok', schema_ready: true, database_configured: true, version: '4.3.0',
+      status: 'ok', schema_ready: true, database_configured: true, version: '4.4.0',
       message: 'ServerKey control plane is operational.'
     }),
     '/api/admin/get-keys': jsonResponse(200, {
@@ -156,6 +156,27 @@ test('master switch persists immediately and targeted notification uses the sele
   await new Promise(resolve => dom.window.setTimeout(resolve, 80));
   assert.match(document.querySelector('#notification-send-status').textContent, /Android device/);
   assert.equal(document.querySelector('#announcement-input').value, '');
+
+  const connectionUri = 'serverkey://connect?base_url=https%3A%2F%2Fserver.example&product_token=TKN_TEST&project_id=aov.vip&protocol=1';
+  responses['/api/admin/integration-manifest'] = jsonResponse(200, {
+    success: true,
+    manifest: {
+      connection_uri: connectionUri,
+      project: { project_id: 'aov.vip', app_version: '1.0.0', product_name: 'VIP Business' },
+      server: {
+        base_url: 'https://server.example',
+        bootstrap: '/api/v1/sdk/bootstrap/TKN_TEST'
+      }
+    }
+  });
+  document.querySelector('#integration-product-input').value = 'TKN_TEST';
+  document.querySelector('#integration-project-input').value = 'aov.vip';
+  document.querySelector('#integration-version-input').value = '1.0.0';
+  document.querySelector('#generate-integration-btn').click();
+  await new Promise(resolve => dom.window.setTimeout(resolve, 80));
+  assert.equal(document.querySelector('#integration-uri-output').value, connectionUri);
+  assert.match(document.querySelector('#integration-code-output').textContent, /ServerKeyRuntime\.create/);
+  assert.equal(document.querySelector('#integration-result').classList.contains('hidden'), false);
   dom.window.close();
 });
 
@@ -163,7 +184,7 @@ test('migration and module failures are shown as degraded, never connected', asy
   const responses = successfulResponses();
   responses['/api/health'] = jsonResponse(503, {
     status: 'migration_required', schema_ready: false, database_configured: true,
-    version: '4.3.0', message: 'Run supabase.sql to install the v4 database schema.'
+    version: '4.4.0', message: 'Run supabase.sql to install the v4 database schema.'
   });
   for (const endpoint of ['/api/admin/stats', '/api/admin/control-config', '/api/admin/devices', '/api/admin/sessions']) {
     responses[endpoint] = jsonResponse(500, { success: false, message: `Database module unavailable: ${endpoint}` });

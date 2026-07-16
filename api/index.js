@@ -158,6 +158,74 @@ function sanitizeString(value, maxLength, fallback = '') {
   return value.trim().slice(0, maxLength);
 }
 
+function getPublicBaseUrl(req) {
+  const configured = sanitizeString(process.env.PUBLIC_BASE_URL, 300);
+  if (configured) {
+    try {
+      const url = new URL(configured);
+      if (url.protocol === 'https:' && url.host) return url.origin;
+    } catch {}
+  }
+  const host = sanitizeString(req.get('host'), 255);
+  if (!/^[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(host)) {
+    throw new Error('Could not determine a safe public server URL.');
+  }
+  const forwardedProtocol = sanitizeString(req.get('x-forwarded-proto'), 20)
+    .split(',')[0].trim().toLowerCase();
+  const protocol = forwardedProtocol === 'https' || req.protocol === 'https' ? 'https' : 'http';
+  if (protocol !== 'https' && !/^(localhost|127\.0\.0\.1)(?::\d+)?$/.test(host)) {
+    throw new Error('PUBLIC_BASE_URL must be HTTPS in production.');
+  }
+  return `${protocol}://${host}`;
+}
+
+function buildIntegrationManifest({ baseUrl, productToken, productName, projectId, appVersion }) {
+  const normalizedBaseUrl = String(baseUrl || '').replace(/\/+$/, '');
+  const params = new URLSearchParams({
+    base_url: normalizedBaseUrl,
+    product_token: productToken,
+    project_id: projectId,
+    protocol: '1'
+  });
+  const connectionUri = `serverkey://connect?${params.toString()}`;
+  return {
+    protocol_version: 1,
+    connection_uri: connectionUri,
+    project: {
+      project_id: projectId,
+      app_version: appVersion,
+      product_name: productName,
+      product_token: productToken
+    },
+    server: {
+      base_url: normalizedBaseUrl,
+      bootstrap: `/api/v1/sdk/bootstrap/${encodeURIComponent(productToken)}`,
+      activate: '/api/v1/client/activate',
+      heartbeat: '/api/v1/client/heartbeat',
+      logout: '/api/v1/client/logout'
+    },
+    client: {
+      heartbeat_min_seconds: 15,
+      heartbeat_max_seconds: 3600,
+      session_storage: 'AES-256-GCM / Android Keystore',
+      transport: 'HTTPS'
+    },
+    android: {
+      sdk_repository: 'https://github.com/tuananh404/MyServer/tree/main/client-sdk/android',
+      config_expression: `ServerKeyConfig.fromConnectionUri(${JSON.stringify(connectionUri)}, ${JSON.stringify(appVersion)})`
+    }
+  };
+}
+
+function validateIntegrationInput(productToken, projectId, appVersion) {
+  if (!productToken) return 'product_token is required.';
+  if (!/^[A-Za-z0-9._-]{2,64}$/.test(projectId)) {
+    return 'project_id must contain 2-64 letters, numbers, dots, underscores, or hyphens.';
+  }
+  if (!parseVersionParts(appVersion)) return 'app_version must use semantic version format, for example 1.0.0.';
+  return '';
+}
+
 function parseRequiredBoolean(value) {
   return typeof value === 'boolean' ? value : null;
 }
@@ -196,10 +264,15 @@ function selectDeviceNotification(config, device, acknowledgedId) {
   return latest && latest.id !== acknowledgedId ? latest : null;
 }
 
-async function updateDeviceMetadata(device, deviceName) {
+async function updateDeviceMetadata(device, deviceName, projectId) {
   const normalizedName = sanitizeString(deviceName, 120);
-  if (!device?.id || !normalizedName) return device;
-  const metadata = { ...(device.metadata || {}), device_name: normalizedName };
+  const normalizedProjectId = sanitizeString(projectId, 64);
+  if (!device?.id || (!normalizedName && !normalizedProjectId)) return device;
+  const metadata = { ...(device.metadata || {}) };
+  if (normalizedName) metadata.device_name = normalizedName;
+  if (/^[A-Za-z0-9._-]{2,64}$/.test(normalizedProjectId)) {
+    metadata.project_id = normalizedProjectId;
+  }
   const { data, error } = await supabase
     .from('devices')
     .update({ metadata })
@@ -263,6 +336,8 @@ function getClientAuthorization(config, appVersion) {
 
 app.locals.getClientAuthorization = getClientAuthorization;
 app.locals.compareVersions = compareVersions;
+app.locals.buildIntegrationManifest = buildIntegrationManifest;
+app.locals.validateIntegrationInput = validateIntegrationInput;
 
 async function getClientPolicy() {
   const [{ data: config, error: configError }, { data: flags, error: flagsError }] = await Promise.all([
@@ -328,7 +403,7 @@ app.get('/api/health', async (req, res) => {
       status: 'degraded',
       database_configured: false,
       schema_ready: false,
-      version: '4.3.0',
+      version: '4.4.0',
       message: 'Database environment variables are missing.',
       timestamp: new Date().toISOString()
     });
@@ -344,7 +419,7 @@ app.get('/api/health', async (req, res) => {
     status: schemaReady ? 'ok' : 'migration_required',
     database_configured: true,
     schema_ready: schemaReady,
-    version: '4.3.0',
+    version: '4.4.0',
     message: schemaReady ? 'ServerKey control plane is operational.' : 'Run supabase.sql to install the v4 database schema.',
     timestamp: new Date().toISOString()
   });
@@ -375,6 +450,69 @@ app.use(['/api/admin', '/api/client', '/api/v1/client'], (req, res, next) => {
     });
   }
   next();
+});
+
+// Public capability/bootstrap document. Product tokens are public client
+// identifiers; this endpoint never returns licenses, sessions, or admin data.
+app.get('/api/v1/sdk/bootstrap/:tokenString', async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ success: false, message: 'Database is not configured.' });
+  }
+  const productToken = sanitizeString(req.params.tokenString, 128);
+  const projectId = sanitizeString(req.query.project_id, 64);
+  const appVersion = sanitizeString(req.query.app_version, 32);
+  const validationError = validateIntegrationInput(productToken, projectId, appVersion);
+  if (validationError) return res.status(400).json({ success: false, message: validationError });
+
+  try {
+    const { data: product, error } = await supabase
+      .from('tokens')
+      .select('token_name, token_string, display_text')
+      .eq('token_string', productToken)
+      .maybeSingle();
+    if (error) throw error;
+    if (!product) return res.status(404).json({ success: false, message: 'Product token not found.' });
+    const manifest = buildIntegrationManifest({
+      baseUrl: getPublicBaseUrl(req),
+      productToken: product.token_string,
+      productName: product.token_name,
+      projectId,
+      appVersion
+    });
+    return res.json({ success: true, manifest });
+  } catch (error) {
+    console.error('[SDK BOOTSTRAP] Failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not create the SDK bootstrap manifest.' });
+  }
+});
+
+app.post('/api/admin/integration-manifest', verifyAdmin, async (req, res) => {
+  const productToken = sanitizeString(req.body.product_token, 128);
+  const projectId = sanitizeString(req.body.project_id, 64);
+  const appVersion = sanitizeString(req.body.app_version, 32);
+  const validationError = validateIntegrationInput(productToken, projectId, appVersion);
+  if (validationError) return res.status(400).json({ success: false, message: validationError });
+
+  try {
+    const { data: product, error } = await supabase
+      .from('tokens')
+      .select('token_name, token_string')
+      .eq('token_string', productToken)
+      .maybeSingle();
+    if (error) throw error;
+    if (!product) return res.status(404).json({ success: false, message: 'Product token not found.' });
+    const manifest = buildIntegrationManifest({
+      baseUrl: getPublicBaseUrl(req),
+      productToken: product.token_string,
+      productName: product.token_name,
+      projectId,
+      appVersion
+    });
+    return res.json({ success: true, manifest });
+  } catch (error) {
+    console.error('[INTEGRATION MANIFEST] Failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not generate the integration manifest.' });
+  }
 });
 
 // ==========================================
@@ -1082,6 +1220,7 @@ app.get('/api/admin/devices', verifyAdmin, async (req, res) => {
     const devices = (deviceResult.data || []).map(device => ({
       ...device,
       device_name: sanitizeString(device.metadata?.device_name, 120) || null,
+      project_id: sanitizeString(device.metadata?.project_id, 64) || null,
       licenses: bindingMap.get(device.hwid) || [],
       active_sessions: activeSessionCounts.get(device.id) || 0
     }));
@@ -1156,7 +1295,8 @@ app.get('/api/admin/sessions', verifyAdmin, async (req, res) => {
 
     const deviceMap = new Map((deviceResult.data || []).map(device => [device.id, {
       ...device,
-      device_name: sanitizeString(device.metadata?.device_name, 120) || null
+      device_name: sanitizeString(device.metadata?.device_name, 120) || null,
+      project_id: sanitizeString(device.metadata?.project_id, 64) || null
     }]));
     const keyMap = new Map((keyResult.data || []).map(key => [key.id, key]));
     const sessions = (sessionResult.data || []).map(session => ({
@@ -1244,6 +1384,7 @@ async function handleClientActivation(req, res) {
   const hwid = sanitizeString(req.body.hwid, 256);
   const appVersion = sanitizeString(req.body.app_version, 32) || null;
   const deviceName = sanitizeString(req.body.device_name, 120);
+  const projectId = sanitizeString(req.body.project_id, 64);
   const acknowledgedNotificationId = sanitizeString(req.body.last_notification_id, 64);
 
   if (!tokenString || !keyString || !hwid) {
@@ -1286,7 +1427,7 @@ async function handleClientActivation(req, res) {
       .eq('id', activation.device_id)
       .single();
     if (registeredDeviceError) throw registeredDeviceError;
-    const device = await updateDeviceMetadata(registeredDevice, deviceName);
+    const device = await updateDeviceMetadata(registeredDevice, deviceName, projectId);
 
     const rawSessionToken = randomSessionToken();
     const sessionExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -1333,6 +1474,7 @@ async function handleClientActivation(req, res) {
       duration_days: activation.duration_days,
       device_id: activation.device_id,
       device_name: device?.metadata?.device_name || deviceName || null,
+      project_id: device?.metadata?.project_id || projectId || null,
       notification,
       config: policy.config,
       features: policy.features
@@ -1414,10 +1556,12 @@ app.post('/api/v1/client/heartbeat', async (req, res) => {
     const now = new Date().toISOString();
     const appVersion = sanitizeString(req.body.app_version, 32) || loadedDevice.app_version;
     const deviceName = sanitizeString(req.body.device_name, 120);
+    const projectId = sanitizeString(req.body.project_id, 64);
     const acknowledgedNotificationId = sanitizeString(req.body.last_notification_id, 64);
     let device = loadedDevice;
-    if (deviceName && deviceName !== sanitizeString(loadedDevice.metadata?.device_name, 120)) {
-      device = await updateDeviceMetadata(loadedDevice, deviceName);
+    if ((deviceName && deviceName !== sanitizeString(loadedDevice.metadata?.device_name, 120)) ||
+        (projectId && projectId !== sanitizeString(loadedDevice.metadata?.project_id, 64))) {
+      device = await updateDeviceMetadata(loadedDevice, deviceName, projectId);
     }
     await Promise.all([
       supabase.from('client_sessions').update({ last_seen_at: now }).eq('id', session.id),
@@ -1442,6 +1586,7 @@ app.post('/api/v1/client/heartbeat', async (req, res) => {
       license_expires_at: license.expires_at,
       device_status: device.status,
       device_name: device.metadata?.device_name || null,
+      project_id: device.metadata?.project_id || null,
       notification,
       config: policy.config,
       features: policy.features

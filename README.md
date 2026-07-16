@@ -90,6 +90,7 @@ Request:
   "key_string": "key-30day-EXAMPLE",
   "hwid": "HWID_DEVICE_INSTALLATION_ID",
   "device_name": "Samsung Galaxy S24 Ultra",
+  "project_id": "client.vip.android",
   "app_version": "1.0.0",
   "last_notification_id": ""
 }
@@ -110,6 +111,7 @@ Successful response:
   "duration_days": 30,
   "device_id": 8,
   "device_name": "Samsung Galaxy S24 Ultra",
+  "project_id": "client.vip.android",
   "notification": {
     "id": "b93b0d55-4d57-48a3-9fa5-9e493f12004b",
     "title": "ServerKey",
@@ -155,6 +157,7 @@ Content-Type: application/json
 {
   "app_version":"1.0.0",
   "device_name":"Samsung Galaxy S24 Ultra",
+  "project_id":"client.vip.android",
   "last_notification_id":"b93b0d55-4d57-48a3-9fa5-9e493f12004b"
 }
 ```
@@ -172,6 +175,8 @@ without restarting.
 For the reusable Android/IMGUI architecture, security boundaries, control
 semantics, and acceptance checklist, see
 [`docs/android-imgui-integration.md`](docs/android-imgui-integration.md).
+The platform-neutral REST contract and Project Connect endpoints are documented
+in [`docs/universal-client-api.md`](docs/universal-client-api.md).
 
 ## Drop-in Android/IMGUI SDK
 
@@ -219,6 +224,7 @@ Control-plane endpoints:
 | GET | `/api/admin/control-config` | Load remote policy and feature flags |
 | PATCH | `/api/admin/control-config` | Update menu, maintenance, version, and update policy |
 | POST | `/api/admin/notifications` | Send a global or per-device notification |
+| POST | `/api/admin/integration-manifest` | Generate a verified project connection URI |
 | POST | `/api/admin/feature-flag` | Create or update a feature flag |
 | DELETE | `/api/admin/feature-flag` | Delete a feature flag |
 | GET | `/api/admin/devices` | List devices, linked licenses, and active sessions |
@@ -228,13 +234,19 @@ Control-plane endpoints:
 
 Existing token, key, stats, and fraud-log admin routes remain compatible.
 
+Public client discovery endpoint:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/sdk/bootstrap/:productToken` | Resolve safe SDK/API metadata for a project ID and app version |
+
 ## Vercel deployment
 
 1. Run `supabase.sql` in the target Supabase project.
 2. Push this repository to GitHub.
 3. Import the repository into Vercel.
 4. Add the environment variables listed above.
-5. Deploy and verify `/api/health` reports `status: ok` and version `4.3.0`.
+5. Deploy and verify `/api/health` reports `status: ok` and version `4.4.0`.
 
 The GitHub/Vercel integration will redeploy automatically after later pushes to
 the configured production branch.

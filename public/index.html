@@ -321,6 +321,57 @@
                     </div>
                 </section>
 
+                <section class="glass-card grid-col-full card-fade-up integration-api-card" data-view-section="overview">
+                    <div class="integration-api-header">
+                        <div>
+                            <span class="page-eyebrow">UNIVERSAL PROJECT CONNECT</span>
+                            <h2><i class="fa-solid fa-code-branch text-gradient"></i> Integration API Generator</h2>
+                            <p>Tạo connection URI và code Android sẵn dùng cho bất kỳ IMGUI project nào.</p>
+                        </div>
+                        <span class="api-version-chip">API v1</span>
+                    </div>
+                    <div class="integration-form-grid">
+                        <div class="form-group">
+                            <label for="integration-product-input">Sản phẩm · Product</label>
+                            <select id="integration-product-input"><option value="">Chọn sản phẩm</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="integration-project-input">Project ID</label>
+                            <input id="integration-project-input" maxlength="64" placeholder="aov-client-vip">
+                        </div>
+                        <div class="form-group">
+                            <label for="integration-version-input">App Version</label>
+                            <input id="integration-version-input" maxlength="32" value="1.0.0" placeholder="1.0.0">
+                        </div>
+                        <button id="generate-integration-btn" class="btn btn-primary btn-glow">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            <span>Tạo kết nối · Generate</span>
+                        </button>
+                    </div>
+                    <div id="integration-result" class="integration-result hidden">
+                        <div class="integration-result-topline">
+                            <span><i class="fa-solid fa-circle-check"></i> Manifest đã được server xác nhận</span>
+                            <span id="integration-product-label">—</span>
+                        </div>
+                        <label for="integration-uri-output">Connection URI</label>
+                        <div class="copy-output-row">
+                            <input id="integration-uri-output" readonly>
+                            <button id="copy-integration-uri" class="btn btn-outline btn-sm"><i class="fa-solid fa-copy"></i> Copy URI</button>
+                        </div>
+                        <label for="integration-code-output">Android code</label>
+                        <div class="integration-code-wrap">
+                            <pre id="integration-code-output"></pre>
+                            <button id="copy-integration-code" class="btn btn-outline btn-sm"><i class="fa-solid fa-code"></i> Copy code</button>
+                        </div>
+                        <div class="integration-api-meta">
+                            <span><i class="fa-solid fa-link"></i><code id="integration-bootstrap-output"></code></span>
+                            <a href="https://github.com/tuananh404/MyServer/tree/main/client-sdk/android" target="_blank" rel="noopener noreferrer">
+                                Mở SDK quick-start <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                            </a>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- FEATURE FLAGS -->
                 <section class="glass-card grid-col-full card-fade-up" data-view-section="features">
                     <div class="card-header">
@@ -386,6 +437,7 @@
                             <thead>
                                 <tr>
                                     <th>Tên thiết bị</th>
+                                    <th>Project</th>
                                     <th>Device ID</th>
                                     <th>Version</th>
                                     <th>Licenses</th>
@@ -397,7 +449,7 @@
                                 </tr>
                             </thead>
                             <tbody id="devices-table-body">
-                                <tr><td colspan="9" class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải thiết bị...</td></tr>
+                                <tr><td colspan="10" class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải thiết bị...</td></tr>
                             </tbody>
                         </table>
                     </div>
