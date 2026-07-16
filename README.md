@@ -225,6 +225,7 @@ Control-plane endpoints:
 | PATCH | `/api/admin/control-config` | Update menu, maintenance, version, and update policy |
 | POST | `/api/admin/notifications` | Send a global or per-device notification |
 | POST | `/api/admin/integration-manifest` | Generate a verified project connection URI |
+| POST | `/api/admin/sdk-package` | Download an authenticated, preconfigured full Android SDK ZIP |
 | POST | `/api/admin/feature-flag` | Create or update a feature flag |
 | DELETE | `/api/admin/feature-flag` | Delete a feature flag |
 | GET | `/api/admin/devices` | List devices, linked licenses, and active sessions |
@@ -246,7 +247,7 @@ Public client discovery endpoint:
 2. Push this repository to GitHub.
 3. Import the repository into Vercel.
 4. Add the environment variables listed above.
-5. Deploy and verify `/api/health` reports `status: ok` and version `4.4.0`.
+5. Deploy and verify `/api/health` reports `status: ok` and version `4.5.0`.
 
 The GitHub/Vercel integration will redeploy automatically after later pushes to
 the configured production branch.

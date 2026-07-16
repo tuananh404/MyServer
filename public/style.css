@@ -1,5 +1,5 @@
 /* ==========================================================================
-   DESIGN SYSTEM & VARIABLES — ServerKey Premium Console v4.4
+   DESIGN SYSTEM & VARIABLES — ServerKey Premium Console v4.5
    ========================================================================== */
 :root {
     --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -1773,7 +1773,7 @@ tbody tr:last-child td { border-bottom: none; }
 .integration-api-meta { margin-top: 12px; color: var(--color-text-dark); font-size: 10px; }
 .integration-api-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .integration-api-meta code { margin-left: 6px; font-family: var(--font-mono); }
-.integration-api-meta a { color: var(--color-secondary); white-space: nowrap; }
+.integration-api-meta .btn { flex: 0 0 auto; white-space: nowrap; }
 
 .inline-check {
     min-height: 40px;
@@ -1912,6 +1912,7 @@ tbody tr:last-child td { border-bottom: none; }
     .integration-form-grid { grid-template-columns: 1fr; }
     .integration-api-header,
     .integration-api-meta { align-items: flex-start; flex-direction: column; }
+    .integration-api-meta .btn { width: 100%; justify-content: center; }
     .copy-output-row { flex-direction: column; }
     .integration-code-wrap pre { padding-right: 14px; padding-top: 52px; }
 }

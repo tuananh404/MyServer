@@ -1,5 +1,5 @@
 /**
- * ServerKey Cloud Business Control Center v4.4
+ * ServerKey Cloud Business Control Center v4.5
  * Real-state owner dashboard for licenses, devices and remote client policy.
  */
 
@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stats: { total: 0, unactivated: 0, activated: 0, expired: 0, banned: 0, fraudAlerts: 0, totalTokens: 0, devices: 0, activeSessions: 0 },
         selectedDuration: 1,
         selectedTokenId: null,
+        integrationPackage: null,
         currentModalAction: null
     };
 
@@ -69,6 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const integrationBootstrapOutput = document.getElementById('integration-bootstrap-output');
     const copyIntegrationUriBtn = document.getElementById('copy-integration-uri');
     const copyIntegrationCodeBtn = document.getElementById('copy-integration-code');
+    const downloadSdkZipBtn = document.getElementById('download-sdk-zip');
 
     // Generator elements
     const tokenSelect = document.getElementById('token-select');
@@ -1187,6 +1189,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         generateIntegrationBtn.disabled = true;
+        downloadSdkZipBtn.disabled = true;
+        state.integrationPackage = null;
         generateIntegrationBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Đang tạo manifest…</span>';
         const res = await apiRequest('/api/admin/integration-manifest', 'POST', {
             product_token: productToken,
@@ -1219,6 +1223,12 @@ document.addEventListener('DOMContentLoaded', () => {
         integrationBootstrapOutput.textContent =
             `${manifest.server.base_url}${manifest.server.bootstrap}?${bootstrapQuery}`;
         integrationProductLabel.textContent = manifest.project.product_name;
+        state.integrationPackage = {
+            product_token: productToken,
+            project_id: projectId,
+            app_version: appVersion
+        };
+        downloadSdkZipBtn.disabled = false;
         integrationResult.classList.remove('hidden');
         showToast('Connection manifest đã sẵn sàng để tích hợp.', 'success');
     });
@@ -1233,6 +1243,61 @@ document.addEventListener('DOMContentLoaded', () => {
         copyToClipboard(integrationCodeOutput.textContent).then(() => {
             showToast('Đã sao chép code tích hợp Android.', 'success');
         });
+    });
+
+    downloadSdkZipBtn.addEventListener('click', async () => {
+        if (!state.integrationPackage || !state.adminToken) {
+            showToast('Hãy Generate kết nối trước khi tải SDK.', 'error');
+            return;
+        }
+
+        const originalHtml = downloadSdkZipBtn.innerHTML;
+        downloadSdkZipBtn.disabled = true;
+        downloadSdkZipBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đóng gói…';
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        try {
+            const response = await fetch('/api/admin/sdk-package', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${state.adminToken}`
+                },
+                body: JSON.stringify(state.integrationPackage),
+                signal: controller.signal
+            });
+            if (!response.ok) {
+                const raw = await response.text();
+                let message = `Không thể tải SDK (HTTP ${response.status}).`;
+                try { message = JSON.parse(raw).message || message; } catch {}
+                throw new Error(message);
+            }
+            const blob = await response.blob();
+            if (blob.size < 100 || !String(response.headers.get('content-type') || '').includes('application/zip')) {
+                throw new Error('Server không trả về một SDK ZIP hợp lệ.');
+            }
+            const disposition = response.headers.get('content-disposition') || '';
+            const serverFilename = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+            const fallbackFilename = `serverkey-${state.integrationPackage.project_id}-${state.integrationPackage.app_version}.zip`;
+            const objectUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = serverFilename || fallbackFilename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+            showToast('Full SDK ZIP đã được tải trực tiếp từ ServerKey.', 'success');
+        } catch (error) {
+            const message = error.name === 'AbortError'
+                ? 'Đóng gói SDK quá thời gian chờ 30 giây.'
+                : error.message;
+            showToast(message, 'error');
+        } finally {
+            clearTimeout(timeoutId);
+            downloadSdkZipBtn.disabled = !state.integrationPackage;
+            downloadSdkZipBtn.innerHTML = originalHtml;
+        }
     });
 
     [maintenanceModeInput, autoUpdateEnabledInput, minimumVersionInput,
