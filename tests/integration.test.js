@@ -24,7 +24,7 @@ test('integration manifest creates a portable versioned ServerKey connection URI
   assert.equal(manifest.project.app_version, '1.2.3');
   assert.equal(Object.hasOwn(manifest, 'admin_password'), false);
   assert.equal(manifest.android.sdk_package_endpoint, '/api/admin/sdk-package');
-  assert.equal(manifest.android.sdk_version, '2.1.1');
+  assert.equal(manifest.android.sdk_version, '2.1.2');
   assert.equal(manifest.android.java_entrypoint, 'com.serverkey.sdk.ServerKeyPlatform');
   assert.deepEqual(manifest.android.supported_abis, ['arm64-v8a', 'armeabi-v7a']);
   assert.equal(JSON.stringify(manifest).includes('github.com'), false);

@@ -65,10 +65,11 @@ still be consumed by a hook.
   keeping the stable hashed HWID as the authorization identity.
 - Acknowledge notification IDs and persist the latest full notification in the
   same encrypted store so a toast is not replayed after every heartbeat.
-- Automatic reactivation only for a genuinely expired session. Explicit
-  revocation and bans must stay locked.
+- Session storage contains only the short-lived session token and notification
+  state; license keys are never persisted. After expiry, require the user to
+  enter the license again. Explicit revocation and bans stay locked.
 
-The tracked V2.1.1 package is in
+The tracked V2.1.2 package is in
 [`client-sdk/android`](../client-sdk/android/README.md). The native archives are
 the same binaries validated by the AovJava pilot. A project-specific adapter
 maps keys such as `menu_vip_core`, `menu_aim`, `menu_auto`, and

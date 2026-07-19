@@ -58,11 +58,8 @@ fi
 APP_DIR=$(CDPATH= cd -- "$TARGET/../.." && pwd)
 PROGUARD="$APP_DIR/proguard-rules.pro"
 if [ -f "$PROGUARD" ]; then
-    if ! grep -q 'com.serverkey.sdk.NativeBridge' "$PROGUARD"; then
-        printf '\n# ServerKey V2 fixed JNI bridge\n-keep class com.serverkey.sdk.NativeBridge { *; }\n' >> "$PROGUARD"
-    fi
-    if ! grep -q 'com.serverkey.sdk.ServerKeyPlatform' "$PROGUARD"; then
-        printf '%s\n' '-keep class com.serverkey.sdk.ServerKeyPlatform { *; }' '-keep class com.serverkey.sdk.ServerKeyPlatform$* { *; }' >> "$PROGUARD"
+    if ! grep -q 'keepnames class com.serverkey.sdk.NativeBridge' "$PROGUARD"; then
+        printf '\n# ServerKey fixed JNI bridge (names only)\n-keepnames class com.serverkey.sdk.NativeBridge\n-keepclassmembernames class com.serverkey.sdk.NativeBridge {\n    native <methods>;\n}\n' >> "$PROGUARD"
     fi
 fi
 
@@ -142,6 +139,6 @@ else
     echo "Copy succeeded; follow README.md section 'Native link' manually." >&2
 fi
 
-echo "ServerKey V2.1.1 installed into: $TARGET"
+echo "ServerKey V2.1.2 installed into: $TARGET"
 echo "Load the host native library before ServerKeyPlatform.create(...)."
 echo "Use GeneratedConnection.CONNECTION_URI when installing a dashboard ZIP."

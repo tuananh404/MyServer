@@ -109,6 +109,8 @@ SERVERKEY_API uint32_t ServerKey_GetApiVersion(void);
 SERVERKEY_API ServerKeyResult ServerKey_Initialize(const char* product_token);
 SERVERKEY_API void ServerKey_Shutdown(void);
 SERVERKEY_API uint8_t ServerKey_IsInitialized(void);
+// Deprecated. Product identifiers are validated during initialization but are
+// no longer retained by the core. Returns 1 and writes an empty string.
 SERVERKEY_API uint32_t ServerKey_CopyProductToken(char* output, uint32_t output_size);
 
 SERVERKEY_API ServerKeyResult ServerKey_SetCallbacks(const ServerKeyCallbacks* callbacks);

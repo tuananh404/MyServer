@@ -1,4 +1,6 @@
-# Native symbols use this fixed Java package/class name.
--keep class com.serverkey.sdk.NativeBridge { *; }
--keep class com.serverkey.sdk.ServerKeyPlatform { *; }
--keep class com.serverkey.sdk.ServerKeyPlatform$* { *; }
+# Native symbols use this fixed Java package/class name. Keep only JNI names;
+# allow R8 to shrink and obfuscate the platform implementation itself.
+-keepnames class com.serverkey.sdk.NativeBridge
+-keepclassmembernames class com.serverkey.sdk.NativeBridge {
+    native <methods>;
+}

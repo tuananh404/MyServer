@@ -26,7 +26,7 @@ test('SDK V2 keeps one Android implementation file and no legacy host sources', 
   }
 });
 
-test('SDK V2.1.1 release archives match the exported checksum manifest', () => {
+test('SDK V2.1.2 release archives match the exported checksum manifest', () => {
   const checksumLines = fs.readFileSync(path.join(sdkRoot, 'SHA256SUMS'), 'utf8')
     .trim().split(/\r?\n/);
   assert.equal(checksumLines.length, 2);
@@ -52,7 +52,7 @@ test('SDK V2 ships both native build-system adapters', () => {
   assert.match(cmake, /function\(serverkey_link target_name\)/);
 });
 
-test('SDK V2.1.1 keeps lock and notification UI behind one stable API', () => {
+test('SDK V2.1.2 keeps lock and notification UI behind one stable API', () => {
   const uiHeader = fs.readFileSync(
     path.join(sdkRoot, 'jni/ServerKey/include/serverkey_ui.h'), 'utf8');
   const cppHeader = fs.readFileSync(

@@ -22,6 +22,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -190,7 +191,6 @@ public final class ServerKeyPlatform {
 
     private volatile boolean stopped;
     private volatile String sessionToken = "";
-    private volatile String licenseKey = "";
     private volatile String lastNotificationId = "";
     private volatile String lastNotificationTitle = "";
     private volatile String lastNotificationMessage = "";
@@ -227,7 +227,6 @@ public final class ServerKeyPlatform {
             return;
         }
         sessionToken = saved.sessionToken;
-        licenseKey = saved.licenseKey;
         lastNotificationId = saved.lastNotificationId;
         lastNotificationTitle = saved.lastNotificationTitle;
         lastNotificationMessage = saved.lastNotificationMessage;
@@ -253,7 +252,6 @@ public final class ServerKeyPlatform {
     public void logout() {
         final String token = sessionToken;
         sessionToken = "";
-        licenseKey = "";
         sessionStore.clear();
         if (!token.isEmpty() && !stopped) {
             executor.execute(new Runnable() {
@@ -290,7 +288,6 @@ public final class ServerKeyPlatform {
                     !result.body.optBoolean("success", false)) {
                 String message = result.body.optString("message", "Kích hoạt license thất bại.");
                 sessionToken = "";
-                licenseKey = "";
                 sessionStore.clear();
                 publishPolicy(Policy.locked(
                         result.body.optString("code", "activation_failed"), message));
@@ -301,13 +298,12 @@ public final class ServerKeyPlatform {
             String token = result.body.optString("token", "").trim();
             if (token.isEmpty()) throw new IllegalStateException("Server did not return a session token.");
             sessionToken = token;
-            licenseKey = license;
             lastSuccessfulContactElapsed = SystemClock.elapsedRealtime();
             Policy policy = Policy.fromResponse(result.body,
                     lastNotificationId, lastNotificationTitle,
                     lastNotificationMessage, lastNotificationCreatedAt);
             rememberNotification(policy);
-            sessionStore.save(token, license, lastNotificationId,
+            sessionStore.save(token, lastNotificationId,
                     lastNotificationTitle, lastNotificationMessage,
                     lastNotificationCreatedAt);
             publishPolicy(policy);
@@ -329,14 +325,6 @@ public final class ServerKeyPlatform {
             body.put("project_id", config.projectId);
             body.put("last_notification_id", lastNotificationId);
             HttpResult result = postJson("/api/v1/client/heartbeat", body, sessionToken);
-            String responseCode = result.body.optString("code", "");
-            if (result.code == 401 && "session_expired".equals(responseCode) &&
-                    !licenseKey.isEmpty()) {
-                sessionToken = "";
-                postConnectionState("connecting", "Phiên đã hết hạn, đang tự động gia hạn...");
-                performActivation(licenseKey);
-                return;
-            }
             if (result.code == 401 || result.code == 403) {
                 String message = result.body.optString("message",
                         "Phiên đã bị thu hồi hoặc hết hạn.");
@@ -399,9 +387,9 @@ public final class ServerKeyPlatform {
         lastNotificationTitle = policy.notificationTitle;
         lastNotificationMessage = policy.notificationMessage;
         lastNotificationCreatedAt = policy.notificationCreatedAt;
-        if (!sessionToken.isEmpty() && !licenseKey.isEmpty()) {
+        if (!sessionToken.isEmpty()) {
             try {
-                sessionStore.save(sessionToken, licenseKey, lastNotificationId,
+                sessionStore.save(sessionToken, lastNotificationId,
                         lastNotificationTitle, lastNotificationMessage,
                         lastNotificationCreatedAt);
             } catch (Exception ignored) {}
@@ -424,9 +412,13 @@ public final class ServerKeyPlatform {
                 connection.setRequestProperty("Authorization", "Bearer " + bearerToken);
             }
             byte[] requestBody = payload.toString().getBytes(StandardCharsets.UTF_8);
-            connection.setFixedLengthStreamingMode(requestBody.length);
-            try (OutputStream output = connection.getOutputStream()) {
-                output.write(requestBody);
+            try {
+                connection.setFixedLengthStreamingMode(requestBody.length);
+                try (OutputStream output = connection.getOutputStream()) {
+                    output.write(requestBody);
+                }
+            } finally {
+                Arrays.fill(requestBody, (byte) 0);
             }
             int status = connection.getResponseCode();
             InputStream stream = status >= 200 && status < 400
@@ -589,17 +581,15 @@ public final class ServerKeyPlatform {
 
     private static final class SessionRecord {
         final String sessionToken;
-        final String licenseKey;
         final String lastNotificationId;
         final String lastNotificationTitle;
         final String lastNotificationMessage;
         final String lastNotificationCreatedAt;
 
-        SessionRecord(String sessionToken, String licenseKey, String lastNotificationId,
+        SessionRecord(String sessionToken, String lastNotificationId,
                       String lastNotificationTitle, String lastNotificationMessage,
                       String lastNotificationCreatedAt) {
             this.sessionToken = sessionToken;
-            this.licenseKey = licenseKey;
             this.lastNotificationId = lastNotificationId;
             this.lastNotificationTitle = lastNotificationTitle;
             this.lastNotificationMessage = lastNotificationMessage;
@@ -619,12 +609,10 @@ public final class ServerKeyPlatform {
             keyAlias = "serverkey.session." + context.getPackageName() + "." + safeProject;
         }
 
-        synchronized void save(String token, String license,
-                               String notificationId, String notificationTitle,
+        synchronized void save(String token, String notificationId, String notificationTitle,
                                String notificationMessage, String notificationCreatedAt) throws Exception {
             JSONObject value = new JSONObject();
             value.put("session_token", token);
-            value.put("license_key", license);
             value.put("last_notification_id", Policy.safe(notificationId));
             value.put("last_notification_title", Policy.safe(notificationTitle));
             value.put("last_notification_message", Policy.safe(notificationMessage));
@@ -651,7 +639,6 @@ public final class ServerKeyPlatform {
                 String token = value.optString("session_token", "").trim();
                 if (token.isEmpty()) return null;
                 return new SessionRecord(token,
-                        value.optString("license_key", "").trim(),
                         value.optString("last_notification_id", "").trim(),
                         value.optString("last_notification_title", "").trim(),
                         value.optString("last_notification_message", "").trim(),
